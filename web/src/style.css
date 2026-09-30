@@ -1,0 +1,526 @@
+@import 'tailwindcss';
+
+/*
+ * MyLedger design tokens.
+ *
+ * Series colours are the validated 8-slot categorical palette (checked with the
+ * data-viz validator against BOTH surfaces below - all gates pass; three light
+ * slots sit under 3:1 on white, which is why every coloured mark in the UI also
+ * carries a visible text label).
+ *
+ * Brand violet: 6.43:1 on white, 6.04:1 on the dark surface.
+ * Muted ink:    5.05:1 on white, 6.09:1 on the dark surface (WCAG AA).
+ */
+:root {
+  color-scheme: light;
+
+  --page: #faf9f7;
+  --surface-1: #ffffff;
+  --surface-2: #f4f3f0;
+  --surface-sunken: #f0efec;
+
+  --text-primary: #16161a;
+  --text-secondary: #55555f;
+  --text-muted: #6e6e77;
+
+  --border: rgba(22, 22, 26, 0.09);
+  --gridline: #e6e5e0;
+  --baseline: #c9c8c2;
+
+  --brand: #5b47d1;
+  --brand-soft: rgba(91, 71, 209, 0.1);
+  --brand-ring: rgba(91, 71, 209, 0.22);
+
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #4a3aa7;
+  --series-8: #e34948;
+
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
+
+  --delta-up: #006300;
+  --delta-down: #d03b3b;
+
+  --shadow-card: 0 1px 2px rgba(22, 22, 26, 0.04), 0 4px 16px rgba(22, 22, 26, 0.04);
+  --shadow-lift: 0 2px 6px rgba(22, 22, 26, 0.06), 0 12px 32px rgba(22, 22, 26, 0.08);
+
+  /*
+   * Three easings, three jobs. Using one curve for everything is what makes an
+   * interface feel uniformly "animated" rather than physical.
+   *   --ease    decelerate: things arriving and settling
+   *   --spring  slight overshoot: things the user just caused (press, toggle)
+   *   --ease-in accelerate: things leaving
+   */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+
+  /* A tinted wash behind hero surfaces; keyed to status at the call site. */
+  --aura: color-mix(in srgb, var(--brand) 7%, transparent);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme='light'])) {
+    color-scheme: dark;
+
+    --page: #101014;
+    --surface-1: #1c1c20;
+    --surface-2: #24242a;
+    --surface-sunken: #16161a;
+
+    --text-primary: #ffffff;
+    --text-secondary: #c2c2cb;
+    --text-muted: #9a9aa4;
+
+    --border: rgba(255, 255, 255, 0.1);
+    --gridline: #2e2e35;
+    --baseline: #3c3c44;
+
+    --brand: #9b8cf5;
+    --brand-soft: rgba(155, 140, 245, 0.14);
+    --brand-ring: rgba(155, 140, 245, 0.3);
+
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
+    --series-7: #9085e9;
+    --series-8: #e66767;
+
+    --delta-up: #0ca30c;
+    --delta-down: #e66767;
+
+    --shadow-card: none;
+    --shadow-lift: 0 12px 32px rgba(0, 0, 0, 0.5);
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --page: #101014;
+  --surface-1: #1c1c20;
+  --surface-2: #24242a;
+  --surface-sunken: #16161a;
+
+  --text-primary: #ffffff;
+  --text-secondary: #c2c2cb;
+  --text-muted: #9a9aa4;
+
+  --border: rgba(255, 255, 255, 0.1);
+  --gridline: #2e2e35;
+  --baseline: #3c3c44;
+
+  --brand: #9b8cf5;
+  --brand-soft: rgba(155, 140, 245, 0.14);
+  --brand-ring: rgba(155, 140, 245, 0.3);
+
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+
+  --delta-up: #0ca30c;
+  --delta-down: #e66767;
+
+  --shadow-card: none;
+  --shadow-lift: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+
+html {
+  font-family: system-ui, -apple-system, 'Segoe UI', 'Assistant', sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--page);
+  color: var(--text-primary);
+  /* Hebrew reads better with slightly looser leading at small sizes */
+  line-height: 1.5;
+}
+
+/* ---------------------------------------------------------------- primitives */
+
+.card {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 1.25rem;
+  box-shadow: var(--shadow-card);
+}
+
+.card-flush {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 1.25rem;
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+.section-title {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.section-hint {
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+
+/* Tabular figures for columns that must align; NEVER on hero numbers. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+.hero-figure {
+  font-size: clamp(2.75rem, 9vw, 4rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+/* ------------------------------------------------------------------ controls */
+
+.field {
+  background: var(--surface-1);
+  border: 1px solid var(--gridline);
+  border-radius: 0.625rem;
+  color: var(--text-primary);
+  padding: 0.4375rem 0.6875rem;
+  font-size: 0.875rem;
+  transition: border-color 0.15s var(--ease);
+}
+.field:hover {
+  border-color: var(--baseline);
+}
+.field:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+  border-color: var(--brand);
+}
+
+.btn {
+  border-radius: 0.625rem;
+  padding: 0.4375rem 0.875rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition:
+    background-color 0.15s var(--ease),
+    border-color 0.15s var(--ease),
+    opacity 0.15s var(--ease);
+}
+.btn:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.btn-primary {
+  background: var(--brand);
+  color: #fff;
+}
+.btn-primary:not(:disabled):hover {
+  filter: brightness(1.08);
+}
+
+.btn-ghost {
+  background: transparent;
+  border-color: var(--gridline);
+  color: var(--text-secondary);
+}
+.btn-ghost:not(:disabled):hover {
+  background: var(--surface-2);
+  border-color: var(--baseline);
+}
+
+.btn-danger-ghost {
+  background: transparent;
+  color: var(--status-critical);
+}
+.btn-danger-ghost:hover {
+  background: color-mix(in srgb, var(--status-critical) 10%, transparent);
+}
+
+.icon-btn {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.625rem;
+  border: 1px solid var(--gridline);
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background-color 0.15s var(--ease);
+}
+.icon-btn:not(:disabled):hover {
+  background: var(--surface-2);
+}
+.icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.icon-btn:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3125rem;
+  border-radius: 999px;
+  padding: 0.1875rem 0.625rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Range slider styled to the token set (both engines) */
+.slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 1.5rem;
+  background: transparent;
+  cursor: pointer;
+}
+.slider::-webkit-slider-runnable-track {
+  height: 0.375rem;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+}
+.slider::-moz-range-track {
+  height: 0.375rem;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+}
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 1.125rem;
+  height: 1.125rem;
+  margin-top: -0.4375rem;
+  border-radius: 999px;
+  background: var(--brand);
+  border: 2px solid var(--surface-1);
+  box-shadow: 0 0 0 1px var(--brand-ring);
+}
+.slider::-moz-range-thumb {
+  width: 1.125rem;
+  height: 1.125rem;
+  border-radius: 999px;
+  background: var(--brand);
+  border: 2px solid var(--surface-1);
+  box-shadow: 0 0 0 1px var(--brand-ring);
+}
+.slider:focus-visible {
+  outline: none;
+}
+.slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 4px var(--brand-ring);
+}
+.slider:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 4px var(--brand-ring);
+}
+
+/* --------------------------------------------------------------------- motion */
+
+/*
+ * Motion here has one job: make the interface feel like it has weight, and make
+ * change legible. Every animation is either an arrival (content appearing), a
+ * response (something the user just did), or a measurement drawing itself in.
+ * Nothing loops, nothing decorates, and the whole layer collapses to nothing
+ * under prefers-reduced-motion - the reduce block at the end is the contract,
+ * not an afterthought.
+ */
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.rise {
+  animation: rise 0.42s var(--ease) both;
+}
+
+/*
+ * Staggered arrival. Children land in reading order rather than all at once,
+ * which is what turns "the page appeared" into "the page assembled itself".
+ * Capped at 10 - past that the last card would wait long enough to feel broken.
+ */
+.stagger > * {
+  animation: rise 0.5s var(--ease) both;
+}
+.stagger > *:nth-child(1) { animation-delay: 0.02s; }
+.stagger > *:nth-child(2) { animation-delay: 0.06s; }
+.stagger > *:nth-child(3) { animation-delay: 0.1s; }
+.stagger > *:nth-child(4) { animation-delay: 0.14s; }
+.stagger > *:nth-child(5) { animation-delay: 0.18s; }
+.stagger > *:nth-child(6) { animation-delay: 0.22s; }
+.stagger > *:nth-child(7) { animation-delay: 0.26s; }
+.stagger > *:nth-child(8) { animation-delay: 0.3s; }
+.stagger > *:nth-child(9) { animation-delay: 0.34s; }
+.stagger > *:nth-child(n + 10) { animation-delay: 0.38s; }
+
+/*
+ * A measurement drawing itself in. Applied to the FILL of a track, scaling from
+ * the inline start so it reads as "filling up" in both LTR and RTL. transform
+ * rather than width so it never triggers layout mid-animation.
+ */
+@keyframes fill-in {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+.fill-in {
+  transform-origin: right center;
+  animation: fill-in 0.85s var(--ease) both;
+}
+:root:dir(ltr) .fill-in {
+  transform-origin: left center;
+}
+
+/* Loading that shows shape instead of a spinner. */
+@keyframes shimmer {
+  to {
+    background-position-x: -200%;
+  }
+}
+
+.skeleton {
+  border-radius: 0.5rem;
+  background: linear-gradient(
+      90deg,
+      var(--surface-sunken) 0%,
+      color-mix(in srgb, var(--surface-2) 70%, var(--surface-1)) 50%,
+      var(--surface-sunken) 100%
+    )
+    0 0 / 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+/* ------------------------------------------------------------------ material */
+
+/*
+ * Cards respond to the pointer. Small numbers on purpose: 2px of travel and a
+ * deeper shadow read as "this is a surface" without the page feeling springy.
+ * Only cards that DO something get .card-interactive.
+ */
+.card-interactive {
+  transition:
+    transform 0.22s var(--ease),
+    box-shadow 0.22s var(--ease),
+    border-color 0.22s var(--ease);
+}
+.card-interactive:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lift);
+  border-color: color-mix(in srgb, var(--brand) 22%, var(--border));
+}
+
+/*
+ * A soft tinted wash bleeding from the top corner of a hero surface. Sits behind
+ * content, never under text that needs contrast, and carries no meaning on its
+ * own - the status is always also stated in words next to it.
+ */
+.aura {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+.aura::before {
+  content: '';
+  position: absolute;
+  inset-block-start: -45%;
+  inset-inline-end: -20%;
+  width: 26rem;
+  height: 26rem;
+  border-radius: 999px;
+  background: radial-gradient(circle, var(--aura) 0%, transparent 68%);
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* Buttons acknowledge the press. */
+.btn:not(:disabled):active,
+.icon-btn:not(:disabled):active {
+  transform: scale(0.96);
+}
+.btn,
+.icon-btn {
+  transition:
+    background-color 0.15s var(--ease),
+    border-color 0.15s var(--ease),
+    opacity 0.15s var(--ease),
+    transform 0.12s var(--spring);
+}
+
+/* Charts hold their previous render while refetching - no skeleton flash. */
+.refetching {
+  opacity: 0.45;
+  transition: opacity 0.2s var(--ease);
+}
+
+/*
+ * The contract. Everything above is enhancement; with reduced motion the
+ * interface must still be complete and readable, so animations are removed
+ * rather than shortened, and elements animated with `both` are forced back to
+ * their final state instead of being left at opacity 0.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .rise,
+  .stagger > *,
+  .fill-in,
+  .skeleton {
+    animation: none;
+  }
+  .stagger > *,
+  .rise {
+    opacity: 1;
+    transform: none;
+  }
+  .fill-in {
+    transform: none;
+  }
+  .card-interactive:hover {
+    transform: none;
+  }
+  .btn:not(:disabled):active,
+  .icon-btn:not(:disabled):active {
+    transform: none;
+  }
+  * {
+    transition-duration: 0.01ms !important;
+  }
+}

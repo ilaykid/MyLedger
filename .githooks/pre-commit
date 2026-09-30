@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+
+NODE=$(command -v node || command -v node.exe || true)
+if [ -z "$NODE" ] && [ -x "/c/Program Files/nodejs/node.exe" ]; then NODE="/c/Program Files/nodejs/node.exe"; fi
+if [ -z "$NODE" ]; then
+  echo "COMMIT BLOCKED: Node.js is required to scan staged content." >&2
+  exit 1
+fi
+"$NODE" scripts/publish-guard.mjs --staged

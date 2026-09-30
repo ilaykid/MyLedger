@@ -1,0 +1,49 @@
+#!/bin/sh
+# Two gates before anything leaves the machine.
+#
+# 1. A clone marked private never pushes. A personal working copy's history is
+#    full of real figures in commit messages and old diffs; publishing is done
+#    from a fresh export (npm run export:public), never from that history.
+#    Mark a clone private with:   git config myledger.private true
+#
+# 2. Every push runs the privacy check: secrets, runtime files, and - when a
+#    local ledger exists - your own account names, card digits and notes.
+#
+# Deliberately a refusal, not a warning: a prompt gets clicked through; a
+# refusal has to be removed on purpose.
+#
+# Enable the hooks once per clone:   git config core.hooksPath .githooks
+
+if [ "$(git config --bool myledger.private 2>/dev/null)" = "true" ]; then
+  cat >&2 <<'EOF'
+
+  PUSH BLOCKED - this clone is marked private (myledger.private=true).
+
+  Its history is a personal record. To publish the code, export a clean copy
+  with a fresh history instead:
+
+      npm run export:public -- ../MyLedger-public
+
+EOF
+  exit 1
+fi
+
+# Run the check with node directly, not through npm: on Windows npm is a
+# .cmd/.ps1 shim that Git's own sh cannot execute.
+NODE=$(command -v node || command -v node.exe || true)
+if [ -z "$NODE" ] && [ -x "/c/Program Files/nodejs/node.exe" ]; then NODE="/c/Program Files/nodejs/node.exe"; fi
+TSX="node_modules/tsx/dist/cli.mjs"
+if [ -z "$NODE" ] || [ ! -f "$TSX" ]; then
+  echo "" >&2
+  echo "  PUSH BLOCKED - the privacy check could not run (Node.js or node_modules missing)." >&2
+  echo "  Run 'npm ci' first, then push again." >&2
+  echo "" >&2
+  exit 1
+fi
+
+if ! "$NODE" scripts/publish-guard.mjs --history || ! "$NODE" "$TSX" scripts/git-safe-check.ts; then
+  echo "" >&2
+  echo "  PUSH BLOCKED - the privacy check found something (see above)." >&2
+  echo "" >&2
+  exit 1
+fi

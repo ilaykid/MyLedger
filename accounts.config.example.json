@@ -1,0 +1,66 @@
+{
+  "$comment": "Copy to accounts.config.json (gitignored) and fill in your own credentials. Each provider expects DIFFERENT field names - the ones below are correct as of israeli-bank-scrapers v6. Delete the entries you do not use.",
+  "accounts": [
+    {
+      "company": "visaCal",
+      "displayName": "כאל",
+      "credentials": {
+        "username": "YOUR_CAL_USERNAME",
+        "password": "YOUR_CAL_PASSWORD"
+      }
+    },
+    {
+      "company": "max",
+      "displayName": "Max",
+      "credentials": {
+        "username": "YOUR_MAX_USERNAME",
+        "password": "YOUR_MAX_PASSWORD"
+      }
+    },
+    {
+      "company": "isracard",
+      "displayName": "ישראכרט",
+      "credentials": {
+        "id": "YOUR_ID_NUMBER",
+        "card6Digits": "LAST_6_DIGITS_OF_CARD",
+        "password": "YOUR_ISRACARD_PASSWORD"
+      }
+    },
+    {
+      "company": "hapoalim",
+      "displayName": "עו\"ש בנק הפועלים",
+      "credentials": {
+        "userCode": "YOUR_USER_CODE",
+        "password": "YOUR_PASSWORD"
+      }
+    },
+    {
+      "company": "leumi",
+      "displayName": "עו\"ש לאומי",
+      "credentials": {
+        "username": "YOUR_USERNAME",
+        "password": "YOUR_PASSWORD"
+      }
+    }
+  ],
+  "$loginFieldsReference": {
+    "hapoalim": ["userCode", "password"],
+    "leumi": ["username", "password"],
+    "mizrahi": ["username", "password"],
+    "discount": ["id", "password", "num"],
+    "mercantile": ["id", "password", "num"],
+    "otsarHahayal": ["username", "password"],
+    "beinleumi": ["username", "password"],
+    "union": ["username", "password"],
+    "massad": ["username", "password"],
+    "yahav": ["username", "nationalID", "password"],
+    "pagi": ["username", "password"],
+    "visaCal": ["username", "password"],
+    "max": ["username", "password"],
+    "isracard": ["id", "card6Digits", "password"],
+    "amex": ["id", "card6Digits", "password"],
+    "behatsdaa": ["id", "password"],
+    "beyahadBishvilha": ["id", "password"],
+    "oneZero": ["email", "password", "phoneNumber", "otpLongTermToken"]
+  }
+}

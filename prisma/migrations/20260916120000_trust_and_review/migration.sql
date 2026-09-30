@@ -1,0 +1,17 @@
+ALTER TABLE "Account" ADD COLUMN "lifecycle" TEXT NOT NULL DEFAULT 'active';
+ALTER TABLE "Account" ADD COLUMN "balanceAt" DATETIME;
+ALTER TABLE "Account" ADD COLUMN "coverageFrom" DATETIME;
+ALTER TABLE "Account" ADD COLUMN "coverageThrough" DATETIME;
+UPDATE "Account" SET "balanceAt" = "scrapedAt" WHERE "balance" IS NOT NULL;
+ALTER TABLE "Transaction" ADD COLUMN "classificationSource" TEXT NOT NULL DEFAULT 'legacy';
+ALTER TABLE "Transaction" ADD COLUMN "classificationRuleId" TEXT;
+ALTER TABLE "Transaction" ADD COLUMN "categorizedAt" DATETIME;
+UPDATE "Transaction" SET "classificationSource" = 'manual' WHERE "categoryLocked" = 1;
+ALTER TABLE "RecurringExpense" ADD COLUMN "source" TEXT NOT NULL DEFAULT 'detected';
+ALTER TABLE "RecurringExpense" ADD COLUMN "validFrom" DATETIME;
+ALTER TABLE "RecurringExpense" ADD COLUMN "validUntil" DATETIME;
+ALTER TABLE "InsightFeedback" ADD COLUMN "snoozedUntil" DATETIME;
+CREATE TABLE "FinancialChange" ("id" TEXT NOT NULL PRIMARY KEY, "title" TEXT NOT NULL, "payload" TEXT NOT NULL, "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "undoneAt" DATETIME);
+CREATE TABLE "QualityDecision" ("key" TEXT NOT NULL PRIMARY KEY, "note" TEXT NOT NULL, "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE "ForecastRecord" ("id" TEXT NOT NULL PRIMARY KEY, "cycleStart" TEXT NOT NULL, "cycleEnd" TEXT NOT NULL, "asOf" TEXT NOT NULL, "predictedNet" INTEGER NOT NULL, "basisCycles" INTEGER NOT NULL, "quality" TEXT NOT NULL, "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE UNIQUE INDEX "ForecastRecord_cycleStart_asOf_key" ON "ForecastRecord"("cycleStart", "asOf");

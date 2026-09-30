@@ -1,0 +1,84 @@
+{
+  "name": "myledger",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Personal financial tracker - Israeli bank/credit-card scraping, categorization and cash-flow dashboard",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": "^22.13.0 || ^24.0.0"
+  },
+  "//dependencies": "Versions are PINNED (no ^). Every runtime dependency here can read the credentials file, so an update is a deliberate, reviewed act - see SECURITY.md. Install with `npm ci`, never a bare `npm install`.",
+  "scripts": {
+    "//postinstall": "Prisma's generated client lives in node_modules, so `npm ci` wipes it and every Prisma type collapses to {}. Regenerating here is our own script, not a third-party install hook.",
+    "postinstall": "prisma generate",
+    "scrape": "tsx src/index.ts",
+    "login": "tsx src/login.ts",
+    "seed": "tsx prisma/seed.ts",
+    "audit": "tsx scripts/audit.ts",
+    "check:consistency": "tsx scripts/consistency-check.ts",
+    "history:prune": "tsx scripts/prune-history.ts",
+    "accounts": "tsx scripts/accounts.ts",
+    "check-config": "tsx scripts/check-config.ts",
+    "secure": "tsx scripts/secure.ts",
+    "secure:check": "tsx scripts/secure-check.ts",
+    "git:safe-check": "tsx scripts/git-safe-check.ts",
+    "export:public": "tsx scripts/export-public.ts",
+    "inspect": "tsx scripts/inspect.ts",
+    "rules:preset": "tsx scripts/rules-preset.ts",
+    "llm:bench": "tsx scripts/llm-bench.ts",
+    "reset": "tsx scripts/reset.ts",
+    "backup": "tsx scripts/backup.ts",
+    "backup:init": "tsx scripts/backup.ts init",
+    "backup:list": "tsx scripts/backup.ts list",
+    "backup:verify": "tsx scripts/backup.ts verify",
+    "schedule:status": "tsx scripts/schedule.ts status",
+    "schedule:check": "tsx scripts/schedule.ts check",
+    "schedule:install": "tsx scripts/schedule.ts install",
+    "schedule:remove": "tsx scripts/schedule.ts remove",
+    "deploy:local": "npm run typecheck && npm run web:typecheck && npm run web:build && tsc && tsx scripts/deploy-local.ts",
+    "package:demo": "npm run typecheck && npm run web:build && tsc && tsx scripts/package-demo.ts",
+    "deps:outdated": "npm outdated || exit 0",
+    "api": "tsx src/server/index.ts",
+    "scheduler": "tsx src/scheduler.ts",
+    "notify": "tsx src/notify-cli.ts",
+    "notify:preview": "tsx src/notify-cli.ts preview",
+    "logs:rotate": "tsx scripts/rotate-logs.ts",
+    "web:dev": "npm --prefix web run dev",
+    "web:build": "npm --prefix web run build",
+    "web:typecheck": "npm --prefix web run typecheck",
+    "//web:install": "Must cd - `npm --prefix web install` treats the root package as a dependency and self-links it",
+    "web:install": "cd web && npm ci",
+    "db:migrate": "prisma migrate dev",
+    "db:generate": "prisma generate",
+    "db:studio": "prisma studio",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/**/*.test.ts"
+  },
+  "dependencies": {
+    "@fastify/cors": "10.1.0",
+    "@fastify/static": "10.1.2",
+    "@prisma/client": "6.19.3",
+    "dotenv": "16.6.1",
+    "fastify": "5.12.5",
+    "israeli-bank-scrapers": "6.8.0",
+    "node-cron": "4.6.0",
+    "puppeteer": "25.12.0",
+    "zod": "3.25.76"
+  },
+  "//overrides": "The scraper still requests Puppeteer 24, whose installer contains vulnerable extract-zip. Share our tested Puppeteer 25 instead. Prisma 6 config needs deepmerge-ts 8 for circular-reference safety. See SECURITY.md and dependency compatibility tests.",
+  "overrides": {
+    "israeli-bank-scrapers": {
+      "puppeteer": "$puppeteer"
+    },
+    "@prisma/config": {
+      "deepmerge-ts": "8.0.2"
+    }
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "prisma": "6.19.3",
+    "tsx": "4.23.1",
+    "typescript": "5.9.3"
+  }
+}

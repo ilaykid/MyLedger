@@ -1,0 +1,5 @@
+# Windows launchers must keep CRLF endings, or cmd.exe misreads them.
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+# Hooks run in Git's sh, which needs LF.
+.githooks/* text eol=lf

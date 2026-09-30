@@ -1,0 +1,343 @@
+// MyLedger - Prisma schema
+//
+// Conventions:
+// - All money amounts are stored as Int in agorot (1 ILS = 100 agorot).
+//   Negative = expense/debit, positive = income/credit.
+// - SQLite does not support Prisma enums or Decimal, so enum-like fields are
+//   String with the allowed values documented; app code validates them.
+//   Switching to PostgreSQL later only requires changing the datasource.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Account {
+  id          String   @id @default(cuid())
+  /// Company id as used by israeli-bank-scrapers: "hapoalim", "leumi", "max", "isracard", "visaCal"...
+  institution String
+  /// Human-friendly name shown in the dashboard, e.g. "עו\"ש הפועלים"
+  displayName String
+  /// "bank" | "credit_card"
+  type        String
+  /// Last 4 digits of the account/card number - part of the stable dedup key
+  lastFour    String
+  /// SHA-256 of institution + the provider's full account identifier. The raw
+  /// identifier is never stored; this prevents two accounts with equal last 4
+  /// digits from being merged into one.
+  sourceKey   String?  @unique
+  /// Stable token used by the v1 dedup recipe. Legacy accounts keep lastFour;
+  /// a colliding newer account receives a sourceKey-based token.
+  dedupIdentity String?
+  /// Current balance in agorot (banks only; credit cards usually have none)
+  balance     Int?
+  /// Credit cards only: day of month the card is settled out of the bank account
+  /// (Max ~2nd, Isracard/Cal ~10th). Drives the credit-card float forecast.
+  billingDay  Int?
+  /// When the scraper last refreshed this account successfully
+  scrapedAt   DateTime?
+  lifecycle   String   @default("active")
+  balanceAt   DateTime?
+  coverageFrom DateTime?
+  coverageThrough DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  balanceObservations BalanceObservation[]
+  transactions Transaction[]
+  recurring    RecurringExpense[]
+
+  @@index([institution, lastFour])
+}
+
+model Transaction {
+  id        String  @id @default(cuid())
+  accountId String
+  account   Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  /// Transaction date (תאריך ביצוע)
+  date          DateTime
+  /// Charge/processing date (תאריך חיוב) - relevant mainly for credit cards
+  processedDate DateTime?
+
+  /// Original description exactly as received from the bank
+  descriptionRaw String
+  /// Normalized description (trimmed, whitespace-collapsed) - used for rules & display
+  description    String
+  /// Whatever the provider sent alongside the transaction (instalment counts etc.)
+  memo           String?
+  /// The user's own explanation of this one transaction. Overrides any
+  /// MerchantNote - a note written about a specific charge is more specific than
+  /// one written about the merchant.
+  note           String?
+
+  /// Charged amount in agorot. Negative = expense.
+  amount   Int
+  currency String @default("ILS")
+  /// For foreign-currency transactions: the original amount/currency before conversion
+  originalAmount   Int?
+  originalCurrency String?
+
+  /// "pending" | "completed"
+  status String @default("completed")
+
+  /// Installments (תשלומים): payment 2 of 6 -> number=2, total=6
+  installmentNumber Int?
+  installmentTotal  Int?
+
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  /// true when the user set the category manually - the rules engine must not override it
+  categoryLocked Boolean @default(false)
+  classificationSource String @default("legacy")
+  classificationRuleId String?
+  categorizedAt DateTime?
+
+
+  /// Bank-provided unique identifier, when the institution supplies one
+  providerIdentifier String?
+  /// Deterministic dedup hash - see src/dedup.ts for the exact recipe
+  dedupHash String @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  spread SpreadPlan?
+
+  @@index([accountId, date])
+  @@index([categoryId])
+  @@index([status])
+}
+
+/// Recognise one lump sum across several months in the cash-flow view.
+///
+/// An annual bonus is the motivating case: it lands in one payment but pays
+/// for the whole year. Counted whole in the month it arrived it makes
+/// that month look extraordinary and the next five look terrible - neither is
+/// true. The same shape covers a once-a-year insurance premium on the way out.
+///
+/// IMPORTANT: this changes the ACCRUAL view only. The money really did move on
+/// one day, and the balance timeline is reconstructed from actual bank
+/// transactions, so it stays untouched. See the accrual/cash split in
+/// src/cashflow.ts - conflating the two is the trap this whole model avoids.
+model SpreadPlan {
+  id String @id @default(cuid())
+
+  /// One plan per transaction: spreading a spread has no meaning.
+  transactionId String      @unique
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  /// Number of months to recognise over, >= 2
+  months Int
+  /// Months to delay the first slice; 0 = start in the month it arrived.
+  offsetMonths Int @default(0)
+  /// The user's own reason, e.g. "בונוס שנתי - פרוס על השנה"
+  note String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Category {
+  id    String  @id @default(cuid())
+  name  String  @unique
+  color String?
+  icon  String?
+  /// Monthly budget in agorot (null = no budget defined). Secondary in the
+  /// cash-flow model - kept for the per-category budget view.
+  monthlyBudget Int?
+  /// The cash-flow classification. This is the primary axis of the whole system:
+  ///   "fixed"    - predictable recurring commitments (rent, insurance, subscriptions)
+  ///   "variable" - discretionary day-to-day spending (groceries, eating out)
+  ///   "income"   - money coming in
+  ///   "transfer" - not real income/expense (credit-card settlement, moving money
+  ///                between own accounts). Excluded from every total, otherwise
+  ///                card purchases would be counted twice.
+  kind String @default("variable")
+  createdAt DateTime @default(now())
+
+  transactions Transaction[]
+  rules        CategoryRule[]
+  recurring    RecurringExpense[]
+}
+
+/// A standing note that attaches to something broader than one transaction, so
+/// it also covers rows that have not been scraped yet.
+///
+/// Two scopes, resolved most-specific-first together with Transaction.note:
+///   "plan"     - one instalment purchase, i.e. all N of its payments.
+///                key = accountId|signature|totalPayments|purchaseMonth
+///   "merchant" - every transaction from that merchant, forever.
+///                key = signatureOf(description)
+///
+/// One table rather than two near-identical ones; `scope` says which kind.
+model Note {
+  id String @id @default(cuid())
+  /// "plan" | "merchant"
+  scope String
+  key   String
+  /// Readable label for the management UI
+  displayName String
+  note        String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt @default(now())
+
+  @@unique([scope, key])
+  @@index([scope])
+}
+
+/// Singleton configuration row (id is always 1).
+model Settings {
+  id Int @id @default(1)
+  /// Day of month the cash-flow cycle starts.
+  ///   1  = plain calendar month (the default, and what most people mean)
+  ///   >1 = anchored to payday, so a cycle always opens with the salary landing
+  /// Anchoring to payday is the more faithful model once a salary is known, but
+  /// it is only worth the extra mental translation if payday is far from the 1st.
+  cycleAnchorDay Int @default(1)
+  /// Historical window (in cycles) used to average variable spending for forecasts
+  forecastLookbackCycles Int @default(3)
+  /// Telegram bot token, DPAPI-sealed like every other credential. The API only
+  /// ever reports whether it is set, never its value.
+  telegramToken String?
+  /// Who the digests go to: one or more numeric chat ids, comma-separated,
+  /// sealed as a single value. A household reads the same numbers, so there is
+  /// one list rather than a row per person.
+  ///
+  /// This is a send list, not an allowlist. The channel is outbound only -
+  /// nothing a recipient sends back is ever acted on - so a name here can read
+  /// the digest and can do nothing else.
+  telegramChatId String?
+  /// How much detail leaves the machine in a notification.
+  ///   "full"    - merchant names and amounts
+  ///   "amounts" - amounts and categories only, no merchant names
+  ///   "minimal" - totals and verdicts only
+  /// Telegram cloud chats are not end-to-end encrypted, so this is a real dial
+  /// on how much of your life sits on someone else's server.
+  notificationDetail String @default("minimal")
+  updatedAt DateTime @updatedAt @default(now())
+}
+
+/// A recurring charge detected automatically from transaction history
+/// (see src/recurring.ts). Drives "what is still going to leave my account
+/// before the cycle ends" - the core of the forecast.
+model RecurringExpense {
+  id String @id @default(cuid())
+  /// Normalized description signature used to group occurrences
+  signature   String @unique
+  displayName String
+  /// "expense" | "income"
+  direction String @default("expense")
+  /// Median observed amount in agorot (negative for expenses)
+  expectedAmount Int
+  /// Typical day of month it is charged
+  expectedDay Int
+  /// Number of occurrences the detector saw
+  occurrences Int
+  /// Spread of observed amounts, in agorot - high value means "amount varies"
+  amountSpread Int @default(0)
+  lastSeen  DateTime
+  frequency String @default("monthly")
+  /// Which account it is charged from (the forecast needs to know if it hits the bank)
+  accountId String?
+  account   Account? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  /// User can silence a detected item without deleting it
+  active     Boolean  @default(true)
+  source     String   @default("detected")
+  validFrom  DateTime?
+  validUntil DateTime?
+  detectedAt DateTime @default(now())
+
+  @@index([active])
+}
+
+model CategoryRule {
+  id      String @id @default(cuid())
+  /// Text to match against the normalized transaction description
+  pattern String
+  /// "contains" (case-insensitive substring) | "regex"
+  matchType String @default("contains")
+  /// Higher priority wins when multiple rules match
+  priority Int @default(0)
+
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+}
+
+/// Durable sync history. Account.scrapedAt answers "how fresh is the data";
+/// this answers "what ran, what failed, and why" even when no account row was
+/// returned by a broken provider.
+model SyncRun {
+  id String @id @default(cuid())
+  company String
+  status String
+  trigger String
+  startedAt DateTime @default(now())
+  finishedAt DateTime?
+  inserted Int @default(0)
+  updated Int @default(0)
+  skipped Int @default(0)
+  error String?
+
+  @@index([company, startedAt])
+  @@index([status, startedAt])
+}
+
+/// The user's verdict on one deterministic observation. This is deliberately
+/// local and contains no financial data; it only prevents dismissed findings
+/// from resurfacing and lets useful findings stay visibly acknowledged.
+model InsightFeedback {
+  id         String   @id @default(cuid())
+  insightKey String   @unique
+  kind       String
+  /// "useful" | "not_relevant"
+  verdict    String
+  snoozedUntil DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([kind, verdict])
+}
+
+model FinancialChange {
+  id String @id @default(cuid())
+  title String
+  payload String
+  createdAt DateTime @default(now())
+  undoneAt DateTime?
+}
+
+model QualityDecision {
+  key String @id
+  note String
+  createdAt DateTime @default(now())
+}
+
+model ForecastRecord {
+  id String @id @default(cuid())
+  cycleStart String
+  cycleEnd String
+  asOf String
+  predictedNet Int
+  basisCycles Int
+  quality String
+  createdAt DateTime @default(now())
+  @@unique([cycleStart, asOf])
+}
+
+model BalanceObservation {
+  id String @id @default(cuid())
+  accountId String
+  account Account @relation(fields:[accountId],references:[id],onDelete:Cascade)
+  amount Int
+  observedAt DateTime @default(now())
+  @@index([accountId,observedAt])
+}

@@ -1,0 +1,3 @@
+CREATE TABLE "BalanceObservation" ("id" TEXT NOT NULL PRIMARY KEY, "accountId" TEXT NOT NULL, "amount" INTEGER NOT NULL, "observedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "BalanceObservation_accountId_fkey" FOREIGN KEY ("accountId") REFERENCES "Account" ("id") ON DELETE CASCADE ON UPDATE CASCADE);
+CREATE INDEX "BalanceObservation_accountId_observedAt_idx" ON "BalanceObservation"("accountId", "observedAt");
+INSERT INTO "BalanceObservation" ("id","accountId","amount","observedAt") SELECT 'initial-' || "id", "id", "balance", "balanceAt" FROM "Account" WHERE "balance" IS NOT NULL AND "balanceAt" IS NOT NULL;
