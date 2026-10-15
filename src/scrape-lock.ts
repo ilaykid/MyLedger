@@ -45,8 +45,8 @@ export class ScrapeLockedError extends Error {
     const since = new Date(holder.startedAt);
     const minutes = Math.max(0, Math.round((Date.now() - since.getTime()) / 60_000));
     super(
-      `משיכה כבר רצה (${holder.label}, תהליך ${holder.pid}, התחילה לפני ${minutes} דקות). ` +
-        `שתי משיכות במקביל נלחמות על אותו פרופיל דפדפן ועל אותו קובץ DB, ולכן הריצה הזו לא התחילה.`,
+      `עדכון נתונים כבר רץ (${holder.label}, התחיל לפני ${minutes} דקות, תהליך ${holder.pid}). ` +
+        `שני עדכונים במקביל היו מתנגשים, אז העדכון הזה לא התחיל. נסו שוב כשהקודם יסתיים.`,
     );
     this.name = 'ScrapeLockedError';
   }

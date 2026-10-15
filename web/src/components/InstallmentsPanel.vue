@@ -8,7 +8,7 @@
  */
 import { computed } from 'vue';
 import type { InstallmentPlan, InstallmentSummary } from '../lib/api.js';
-import { fmtDayMonth, fmtILSRound, fmtMonth } from '../lib/format.js';
+import { fmtCount, fmtDayMonth, fmtILSRound, fmtMonth, fmtSigned } from '../lib/format.js';
 
 const props = defineProps<{ plans: InstallmentPlan[]; summary: InstallmentSummary }>();
 
@@ -31,12 +31,12 @@ const progress = (p: InstallmentPlan) => (p.paidPayments / p.totalPayments) * 10
 
     <p v-if="active.length === 0" class="mt-4 text-sm" :style="{ color: 'var(--text-muted)' }">
       אין תוכניות תשלומים פעילות.
-      <template v-if="finishedCount">{{ finishedCount }} תוכניות הסתיימו.</template>
+      <template v-if="finishedCount">{{ finishedCount === 1 ? 'תוכנית אחת הסתיימה.' : `${finishedCount} תוכניות הסתיימו.` }}</template>
     </p>
 
     <template v-else>
       <p class="section-hint mt-1">
-        {{ active.length }} תוכניות פעילות · נותר לשלם
+        {{ fmtCount(active.length, 'תוכנית פעילה אחת', 'תוכניות פעילות') }} · נותר לשלם
         <span class="tnum font-semibold">{{ fmtILSRound(summary.totalRemaining) }}</span>
       </p>
 
@@ -60,8 +60,8 @@ const progress = (p: InstallmentPlan) => (p.paidPayments / p.totalPayments) * 10
           <div class="mt-1 flex flex-wrap justify-between gap-x-3 text-xs" :style="{ color: 'var(--text-muted)' }">
             <span>שולמו {{ p.paidPayments }} מתוך {{ p.totalPayments }}</span>
             <span>
-              עוד {{ p.remainingPayments }} · מסתיים
-              <span :style="{ color: 'var(--text-secondary)' }">{{ p.endsOn ? fmtDayMonth(p.endsOn) : '' }}</span>
+              עוד {{ fmtCount(p.remainingPayments, 'תשלום אחד', 'תשלומים') }}<template v-if="p.endsOn"> · מסתיים
+              ב-<span :style="{ color: 'var(--text-secondary)' }">{{ fmtDayMonth(p.endsOn) }}</span></template>
             </span>
           </div>
         </li>
@@ -81,7 +81,7 @@ const progress = (p: InstallmentPlan) => (p.paidPayments / p.totalPayments) * 10
               <span class="text-xs" :style="{ color: 'var(--text-muted)' }">— {{ f.plans.join(', ') }}</span>
             </span>
             <span class="tnum shrink-0 font-semibold" :style="{ color: 'var(--delta-up)' }">
-              +{{ fmtILSRound(f.amount) }}
+              {{ fmtSigned(f.amount) }}
             </span>
           </li>
         </ul>

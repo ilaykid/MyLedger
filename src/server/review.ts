@@ -5,7 +5,7 @@ import { prisma } from '../db.js';
 import { withChange, undoChange, ChangeConflict } from '../changes.js';
 import { qualityItems, qualityReport } from '../finance-quality.js';
 import { normalizeCurrency } from '../currency.js';
-import { ruleMatches } from '../categorize.js';
+import { ruleMatches, applySingleRule, claimableBy } from '../categorize.js';
 import { compileSafeRegex } from '../safe-regex.js';
 import { classify, cashflowSnapshot, monthlyHistory } from '../cashflow.js';
 import { slicesFor } from '../spread.js';
@@ -49,6 +49,10 @@ export async function searchTransactions(input: unknown) {
         start: date.optional(), end: date.optional(), chargeDate: date.optional(), status: z.enum(['pending', 'completed']).optional(), currency: z.string().min(1).max(12).optional(),
         min: z.coerce.number().int().min(0).optional(), max: z.coerce.number().int().min(0).optional(),
         flow: z.enum(['fixed', 'variable', 'income', 'transfer', 'excluded', 'savings']).optional(), q: z.string().max(200).optional(),
+        // Internal transfers and card settlements are the same money as the
+        // purchases they pay for, so totals that include them count it twice.
+        // The rows stay listed; only the summary leaves them out.
+        summaryTransfers: z.enum(['include', 'exclude']).default('include'),
         page: z.coerce.number().int().min(1).default(1), pageSize: z.coerce.number().int().min(1).max(200).default(50),
     }).parse(input);
     if (q.start && q.end && q.end < q.start)
@@ -97,8 +101,9 @@ export async function searchTransactions(input: unknown) {
                 matchingRules: matched.map(r => ({ id: r.id, pattern: r.pattern, priority: r.priority })),
             }];
     });
+    const counted = q.summaryTransfers === 'exclude' && !q.flow ? filtered.filter(t => t.flow !== 'transfer') : filtered;
     return { items: filtered.slice((q.page - 1) * q.pageSize, q.page * q.pageSize), total: filtered.length, page: q.page, pageSize: q.pageSize,
-        summary: { income: filtered.reduce((s, t) => s + Math.max(0, t.contribution), 0), expense: filtered.reduce((s, t) => s + Math.max(0, -t.contribution), 0), net: filtered.reduce((s, t) => s + t.contribution, 0), basis: q.includeSpread === 'true' ? 'accrual' : 'transactions' } };
+        summary: { income: counted.reduce((s, t) => s + Math.max(0, t.contribution), 0), expense: counted.reduce((s, t) => s + Math.max(0, -t.contribution), 0), net: counted.reduce((s, t) => s + t.contribution, 0), basis: q.includeSpread === 'true' ? 'accrual' : 'transactions', transfersExcluded: counted !== filtered } };
 }
 export async function registerReviewRoutes(app: FastifyInstance) {
     app.get('/api/quality', async () => ({ ...await qualityReport(), decisions: await prisma.qualityDecision.findMany({ orderBy: { createdAt: 'desc' } }) }));
@@ -136,9 +141,10 @@ export async function registerReviewRoutes(app: FastifyInstance) {
         if (b.matchType === 'regex')
             compileSafeRegex(b.pattern);
         const [rows, rules] = await Promise.all([prisma.transaction.findMany({ include: { category: true } }), prisma.categoryRule.findMany({ orderBy: [{ priority: 'desc' }, { createdAt: 'asc' }] })]);
-        const candidate = { ...b, id: b.id ?? 'preview' };
+        const candidate = { ...b, id: b.id ?? 'preview', createdAt: rules.find(r => r.id === b.id)?.createdAt ?? new Date() };
         const matched = rows.filter(t => ruleMatches(candidate, t.description));
-        return { count: matched.length, locked: matched.filter(t => t.categoryLocked).length, conflicts: matched.filter(t => rules.some(r => r.id !== b.id && r.categoryId !== b.categoryId && r.priority >= b.priority && ruleMatches(r, t.description))).length, amount: matched.reduce((s, t) => s + Math.abs(t.amount), 0), samples: matched.slice(0, 10) };
+        return { count: matched.length, locked: matched.filter(t => t.categoryLocked).length, conflicts: matched.filter(t => rules.some(r => r.id !== b.id && r.categoryId !== b.categoryId && r.priority >= b.priority && ruleMatches(r, t.description))).length,
+            claimable: claimableBy(candidate, rules, matched).length, amount: matched.reduce((s, t) => s + Math.abs(t.amount), 0), samples: matched.slice(0, 10) };
     });
     app.patch('/api/rules/:id', async (req) => {
         const { id } = z.object({ id: z.string() }).parse(req.params);
@@ -146,6 +152,11 @@ export async function registerReviewRoutes(app: FastifyInstance) {
         if (b.matchType === 'regex')
             compileSafeRegex(b.pattern);
         return withChange('עריכת חוק', async (_db, change) => change('categoryRule', id, b));
+    });
+    app.post('/api/rules/:id/apply', async (req) => {
+        const { id } = z.object({ id: z.string() }).parse(req.params);
+        const b = z.object({ preview: z.boolean().default(false) }).parse(req.body ?? {});
+        return applySingleRule(id, b);
     });
     app.post('/api/categories/:id/preview', async (req) => {
         const { id } = z.object({ id: z.string() }).parse(req.params);

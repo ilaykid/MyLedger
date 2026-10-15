@@ -10,7 +10,7 @@
  * Diverging form (above/below a zero baseline) uses the validated blue↔red pair
  * with a neutral zero rule - not green/red, which is the single worst pair under
  * colour-blindness. Direction is never carried by colour alone: every bar has a
- * sign in its tooltip, the verdict says "חיובי"/"שלילי" in words, and the table
+ * sign in its tooltip, the verdict says "עודף"/"גירעון" in words, and the table
  * view lists every value.
  */
 import { computed, ref } from 'vue';
@@ -57,13 +57,16 @@ const selected = computed(
  *
  * So while the month runs, the verdict is the projection and the actual-so-far
  * figure moves down into the facts list. A finished month has nothing to
- * project and keeps the verdict it earned.
+ * project and keeps the verdict it earned. A running month WITHOUT a projection
+ * (the cash-flow cycle is not the calendar month) gets no verdict at all - only
+ * the facts so far - rather than a red month-to-date figure.
  */
 const forecasting = computed(() => selected.value != null && !selected.value.complete && props.projection != null);
 const verdictNet = computed(() =>
   forecasting.value ? (props.projection?.net ?? 0) : (selected.value?.net ?? 0),
 );
 const positive = computed(() => verdictNet.value >= 0);
+const inProgress = computed(() => selected.value != null && !selected.value.complete && !forecasting.value);
 
 /**
  * A forecast this close to zero has no business claiming a sign - it is built
@@ -78,17 +81,17 @@ const soFarNet = computed(() =>
 );
 
 const verdict = computed(() => {
-  if (level.value) return { icon: '⚖️', label: 'תזרים מאוזן', tone: 'var(--status-good)' };
+  if (level.value) return { icon: '⚖️', label: 'צפוי להסתיים מאוזן', tone: 'var(--status-good)' };
   if (positive.value) {
     return {
       icon: '✅',
-      label: forecasting.value ? 'צפוי להסתיים בחיוב' : 'תזרים חיובי',
+      label: forecasting.value ? 'צפוי עודף בסוף החודש' : 'החודש הסתיים בעודף',
       tone: 'var(--delta-up)',
     };
   }
   return {
     icon: forecasting.value ? '⚠️' : '🔴',
-    label: forecasting.value ? 'צפוי להסתיים בחיסרון' : 'תזרים שלילי',
+    label: forecasting.value ? 'צפוי גירעון בסוף החודש' : 'החודש הסתיים בגירעון',
     // Amber for a forecast, red only for something that already happened.
     tone: forecasting.value ? 'var(--status-warning)' : 'var(--delta-down)',
   };
@@ -151,6 +154,13 @@ const active = computed(() => props.months.find((m) => m.month === hovered.value
           </p>
         </template>
 
+        <template v-else-if="inProgress">
+          <p class="text-2xl font-bold" :style="{ color: 'var(--text-secondary)' }">החודש עוד לא הסתיים</p>
+          <p class="mt-1.5 text-sm" :style="{ color: 'var(--text-muted)' }">
+            אין עדיין עודף או גירעון לחודש הזה. למטה מה שנכנס ויצא עד היום; את התחזית למחזור אפשר לראות במבט על המחזור.
+          </p>
+        </template>
+
         <template v-else>
           <p class="text-2xl font-bold" :style="{ color: verdict.tone }">
             <span aria-hidden="true">{{ verdict.icon }}</span>
@@ -162,9 +172,6 @@ const active = computed(() => props.months.find((m) => m.month === hovered.value
           <!-- Context only. The actual figures live in the equation below, once. -->
           <p v-if="forecasting && projection" class="mt-1.5 text-xs" :style="{ color: 'var(--text-muted)' }">
             צפי לסוף החודש · יום {{ projection.daysElapsed }} מתוך {{ projection.daysTotal }}
-          </p>
-          <p v-else-if="!selected.complete" class="mt-1 text-xs" :style="{ color: 'var(--text-muted)' }">
-            החודש עוד לא הסתיים — המספר ישתנה
           </p>
         </template>
       </div>
@@ -233,7 +240,7 @@ const active = computed(() => props.months.find((m) => m.month === hovered.value
             <p class="tnum mt-0.5 text-lg font-semibold" :style="{ color: 'var(--status-good)' }">
               {{ fmtILSRound(selected.savings) }}
             </p>
-            <p class="mt-0.5 text-xs" :style="{ color: 'var(--text-muted)' }">מחוץ לנטו — הכסף עדיין שלך</p>
+            <p class="mt-0.5 text-xs" :style="{ color: 'var(--text-muted)' }">לא נספר כהוצאה — הכסף עדיין שלכם</p>
           </div>
         </template>
       </div>
@@ -246,7 +253,7 @@ const active = computed(() => props.months.find((m) => m.month === hovered.value
       >
         <span aria-hidden="true">🐷</span>
         בנוסף הופקדו <span class="tnum font-semibold">{{ fmtILSRound(selected.savings) }}</span> לחיסכון —
-        מחוץ למשוואה שלמעלה, הכסף עדיין שלך.
+        מחוץ למשוואה שלמעלה, הכסף עדיין שלכם.
       </p>
     </div>
 
@@ -262,7 +269,7 @@ const active = computed(() => props.months.find((m) => m.month === hovered.value
     >
       <span aria-hidden="true">📈</span>
       <span class="font-semibold">{{ reliance }}%</span>
-      מההכנסה החודש הייתה הכנסה משתנה. אל תתכנן את החודש הבא לפי המספר הזה.
+      מההכנסה החודש הייתה הכנסה משתנה. לא כדאי לתכנן את החודש הבא לפי המספר הזה.
     </p>
 
     <!--
@@ -284,7 +291,7 @@ const active = computed(() => props.months.find((m) => m.month === hovered.value
       <template v-if="selected.excludedIn > 0">
         נכנסו <span class="tnum font-semibold">{{ fmtILSRound(selected.excludedIn) }}</span>
       </template>
-      שסומנו כלא-תזרימיים. הם שינו את היתרה אבל לא נספרים בתזרים — הם לא מלמדים כלום על החודש הבא.
+      שסומנו כ״לא נספר בתזרים״. הם שינו את היתרה בעו״ש, אבל לא מלמדים כלום על החודש הבא.
     </p>
 
     <!-- The number is only as honest as its inputs - say so rather than alarm. -->
@@ -295,7 +302,7 @@ const active = computed(() => props.months.find((m) => m.month === hovered.value
     >
       <span aria-hidden="true">⚠️</span>
       אין הכנסות רשומות — רק כרטיסי אשראי מחוברים, ולכן כל חודש נראה שלילי.
-      חברו חשבון בנק בעמוד <RouterLink to="/connections" class="font-semibold underline">חיבורים</RouterLink>
+      חברו חשבון בנק בעמוד <RouterLink to="/connections" class="font-semibold underline">חשבונות וחיבורים</RouterLink>
       כדי לקבל תזרים אמיתי.
     </p>
 
@@ -314,8 +321,8 @@ const active = computed(() => props.months.find((m) => m.month === hovered.value
             <th scope="col" class="px-3 py-2 font-medium">מזה משתנה</th>
             <th scope="col" class="px-3 py-2 font-medium">יצא</th>
             <th scope="col" class="px-3 py-2 font-medium">לחיסכון</th>
-            <th scope="col" class="px-3 py-2 font-medium">לא תזרימי</th>
-            <th scope="col" class="px-3 py-2 font-medium">נטו</th>
+            <th scope="col" class="px-3 py-2 font-medium">לא נספר בתזרים</th>
+            <th scope="col" class="px-3 py-2 font-medium">עודף / גירעון</th>
           </tr>
         </thead>
         <tbody>
@@ -367,7 +374,7 @@ const active = computed(() => props.months.find((m) => m.month === hovered.value
             :key="m.month"
             type="button"
             class="group relative flex-1 cursor-default"
-            :aria-label="`${fmtMonth(m.month)}: נטו ${m.net >= 0 ? 'חיובי' : 'שלילי'} ${fmtILSRound(Math.abs(m.net))}${m.excludedIn + m.excludedOut > 0 ? `, ובנוסף ${fmtILSRound(m.excludedIn + m.excludedOut)} לא תזרימי` : ''}`"
+            :aria-label="`${fmtMonth(m.month)}: ${m.net >= 0 ? 'עודף' : 'גירעון'} ${fmtILSRound(Math.abs(m.net))}${m.complete ? '' : ' עד היום'}${m.excludedIn + m.excludedOut > 0 ? `, ובנוסף ${fmtILSRound(m.excludedIn + m.excludedOut)} לא נספרו בתזרים` : ''}`"
             @pointerenter="hovered = m.month"
             @focus="hovered = m.month"
             @blur="hovered = null"
@@ -420,7 +427,7 @@ const active = computed(() => props.months.find((m) => m.month === hovered.value
         <span v-for="m in months" :key="m.month" class="flex-1 truncate">
           <span
             v-if="m.excludedIn + m.excludedOut > 0"
-            :title="`בנוסף ${fmtILSRound(m.excludedIn + m.excludedOut)} לא תזרימי`"
+            :title="`בנוסף ${fmtILSRound(m.excludedIn + m.excludedOut)} לא נספרו בתזרים`"
             >⚡</span
           >
           {{ fmtMonthShort(m.month) }}
@@ -435,7 +442,7 @@ const active = computed(() => props.months.find((m) => m.month === hovered.value
       :style="{ borderColor: 'var(--gridline)', color: 'var(--text-secondary)' }"
     >
       <span class="font-semibold">{{ positiveCount }} מתוך {{ finished.length }}</span>
-      החודשים האחרונים הסתיימו בחיוב, בממוצע
+      החודשים האחרונים הסתיימו בעודף, בממוצע
       <span class="tnum font-semibold" :style="{ color: averageNet >= 0 ? 'var(--delta-up)' : 'var(--delta-down)' }">
         {{ fmtSigned(averageNet) }}
       </span>
@@ -448,9 +455,9 @@ const active = computed(() => props.months.find((m) => m.month === hovered.value
       class="mt-4 border-t pt-3 text-sm"
       :style="{ borderColor: 'var(--gridline)', color: 'var(--text-secondary)' }"
     >
-      הוצאת בממוצע
+      בממוצע יצאו
       <span class="tnum font-semibold">{{ fmtILSRound(Math.abs(averageNet)) }}</span>
-      לחודש ב-{{ finished.length }} החודשים האחרונים.
+      לחודש {{ finished.length === 1 ? 'בחודש האחרון' : `ב-${finished.length} החודשים האחרונים` }}.
     </p>
   </section>
 </template>

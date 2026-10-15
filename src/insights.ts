@@ -106,9 +106,6 @@ async function loadRows(since: Date): Promise<Row[]> {
 }
 
 /**
- * @param windowDays how far back "recent" reaches for the event-style insights
- */
-/**
  * A fixed expense that was due and has not arrived.
  *
  * The forecast already knows every recurring commitment and the day it usually
@@ -227,12 +224,23 @@ async function creditsInExpenseCategories(now: Date): Promise<DraftInsight[]> {
   }));
 }
 
-export async function generateInsights(windowDays = 7): Promise<Insight[]> {
-  const now = new Date();
+/**
+ * @param windowDays how far back "recent" reaches for the event-style insights
+ * @param asOf exclusive end of a PAST period to look back on (the monthly
+ *   digest's "what stood out in September"). Without it the findings are about
+ *   today. With it, nothing after `asOf` is seen, and the present-tense checks -
+ *   a bill late right now, a miscategorised credit to fix, an instalment plan
+ *   ending soon - are skipped, because they describe today and would leak the
+ *   current month into a summary of a finished one.
+ */
+export async function generateInsights(windowDays = 7, asOf?: Date): Promise<Insight[]> {
+  const realNow = new Date();
+  const retrospective = asOf != null;
+  const now = asOf ? new Date(asOf.getTime() - 1) : realNow;
   const history = new Date(now.getFullYear(), now.getMonth() - 12, 1);
   const windowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - windowDays);
 
-  const rows = await loadRows(history);
+  const rows = (await loadRows(history)).filter((r) => !asOf || r.date < asOf);
   const spending = rows.filter((r) => r.amount < 0 && countsAsSpending(r));
   const recent = spending.filter((r) => r.date >= windowStart);
 
@@ -376,7 +384,8 @@ export async function generateInsights(windowDays = 7): Promise<Insight[]> {
   const thisMonth = monthKey(now);
   const dayOfMonth = now.getDate();
   const perCategoryThis = new Map<string, number>();
-  const perCategoryPrev = new Map<string, number[]>();
+  /** Per category, per earlier month: the total over the same slice of days. */
+  const perCategoryPrev = new Map<string, Map<string, number>>();
 
   for (const r of spending) {
     const name = r.category?.name;
@@ -386,15 +395,17 @@ export async function generateInsights(windowDays = 7): Promise<Insight[]> {
     if (key === thisMonth) {
       perCategoryThis.set(name, (perCategoryThis.get(name) ?? 0) + Math.abs(r.amount));
     } else {
-      const list = perCategoryPrev.get(name) ?? [];
-      list.push(Math.abs(r.amount));
-      perCategoryPrev.set(name, list);
+      const months = perCategoryPrev.get(name) ?? new Map<string, number>();
+      months.set(key, (months.get(key) ?? 0) + Math.abs(r.amount));
+      perCategoryPrev.set(name, months);
     }
   }
 
   const movers: Array<{ name: string; now: number; typical: number; delta: number }> = [];
   for (const [name, current] of perCategoryThis) {
-    const past = perCategoryPrev.get(name) ?? [];
+    // Month totals, not single purchases: the median grocery RUN is not what a
+    // month of groceries costs, and comparing against it fired on every month.
+    const past = [...(perCategoryPrev.get(name)?.values() ?? [])];
     if (past.length < 3) continue;
     const typical = median(past);
     if (typical < 10_000) continue; // ignore categories too small to matter
@@ -408,7 +419,9 @@ export async function generateInsights(windowDays = 7): Promise<Insight[]> {
       kind: 'category_jump',
       rank: 3,
       title: `${riser.name} גבוה מהרגיל`,
-      detail: `${ils(riser.now)} עד עכשיו החודש, לעומת ${ils(riser.typical)} שהוצאת באותו יום בחודשים קודמים.`,
+      detail: retrospective
+        ? `${ils(riser.now)} בכל החודש, לעומת ${ils(riser.typical)} בחודש רגיל.`
+        : `${ils(riser.now)} עד עכשיו החודש, לעומת ${ils(riser.typical)} שהוצאת באותו יום בחודשים קודמים.`,
       amount: riser.delta,
     });
   }
@@ -418,14 +431,16 @@ export async function generateInsights(windowDays = 7): Promise<Insight[]> {
       kind: 'category_drop',
       rank: 5,
       title: `${faller.name} נמוך מהרגיל`,
-      detail: `${ils(faller.now)} עד עכשיו החודש, לעומת ${ils(faller.typical)} בדרך כלל. חסכת ${ils(Math.abs(faller.delta))}.`,
+      detail: retrospective
+        ? `${ils(faller.now)} בכל החודש, לעומת ${ils(faller.typical)} בחודש רגיל.`
+        : `${ils(faller.now)} עד עכשיו החודש, לעומת ${ils(faller.typical)} בדרך כלל. חסכת ${ils(Math.abs(faller.delta))}.`,
       amount: Math.abs(faller.delta),
     });
   }
 
   // -------------------------------------------------- 5. instalments ending
-  const plans = await installmentSummary();
-  if (plans.nextToFinish) {
+  const plans = retrospective ? null : await installmentSummary();
+  if (plans?.nextToFinish) {
     const monthsAway =
       (new Date(plans.nextToFinish.endsOn).getFullYear() - now.getFullYear()) * 12 +
       (new Date(plans.nextToFinish.endsOn).getMonth() - now.getMonth());
@@ -459,8 +474,10 @@ export async function generateInsights(windowDays = 7): Promise<Insight[]> {
     });
   }
 
-  insights.push(...(await lateFixedExpenses(now)));
-  insights.push(...(await creditsInExpenseCategories(now)));
+  if (!retrospective) {
+    insights.push(...(await lateFixedExpenses(now)));
+    insights.push(...(await creditsInExpenseCategories(now)));
+  }
 
   insights.sort((a, b) => a.rank - b.rank || (b.amount ?? 0) - (a.amount ?? 0));
 
@@ -475,7 +492,7 @@ export async function generateInsights(windowDays = 7): Promise<Insight[]> {
     where: { insightKey: { in: keyed.map((i) => i.key) } },
     select: { insightKey: true, verdict: true, snoozedUntil: true },
   });
-  const verdicts = new Map(feedback.filter(f => f.verdict !== 'useful' && !(f.verdict === 'snoozed' && (!f.snoozedUntil || f.snoozedUntil <= now))).map((f) => [f.insightKey, f.verdict]));
+  const verdicts = new Map(feedback.filter(f => f.verdict !== 'useful' && !(f.verdict === 'snoozed' && (!f.snoozedUntil || f.snoozedUntil <= realNow))).map((f) => [f.insightKey, f.verdict]));
 
   // A dismissed observation should not return in the dashboard or Telegram.
   // Both answers resolve the notification. "Useful" is positive product

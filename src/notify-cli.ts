@@ -1,6 +1,6 @@
 import { prisma } from './db.js';
 import { sendDigest } from './notify.js';
-import { buildDigest, digestForToday, type DigestKind } from './digests.js';
+import { composeDigest, digestForToday, type DigestKind } from './digests.js';
 
 /**
  *   npm run notify                    send the digest today calls for
@@ -19,8 +19,8 @@ async function main() {
   const kind = explicit ?? digestForToday();
 
   if (preview) {
-    const text = await buildDigest(kind);
-    console.log(`--- ${kind} digest (not sent) ---\n`);
+    const { text, silent } = await composeDigest(kind);
+    console.log(`--- ${kind} digest (not sent${silent ? ', would arrive silently' : ''}) ---\n`);
     // Telegram renders these; the terminal should not show the markup.
     console.log(text.replace(/<\/?(b|i|code)>/g, ''));
     return;
@@ -28,7 +28,7 @@ async function main() {
 
   const result = await sendDigest(kind);
   if (result.sent) {
-    console.log(`Sent the ${result.kind} digest.`);
+    console.log(`Sent the ${result.kind} digest${result.silent ? ' (silently - a routine day)' : ''}.`);
   } else if (result.error === 'not_configured') {
     console.log('Telegram is not configured - set it up on the Connections page.');
   } else {

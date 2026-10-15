@@ -2,7 +2,7 @@
 import { computed } from 'vue';
 import type { RouteLocationRaw } from 'vue-router';
 import type { CashflowEvent } from '../lib/api';
-import { fmtDayMonth, fmtILSRound, fmtSigned } from '../lib/format';
+import { fmtILSRound, fmtRelativeDay, fmtSigned } from '../lib/format';
 const props = defineProps<{events: CashflowEvent[]; compact?: boolean; allLink?: RouteLocationRaw}>();
 const ordered = computed(() => [...props.events].sort((a,b) => a.date.localeCompare(b.date)));
 const visible = computed(() => props.compact ? ordered.value.slice(0,3) : ordered.value);
@@ -11,11 +11,11 @@ const totalIn = computed(() => props.events.filter(e => e.amount > 0).reduce((su
 </script>
 <template>
   <section class="upcoming-list" :class="{'is-compact':compact}">
-    <div class="upcoming-heading"><h2>{{compact?'האירועים הקרובים':'מה עוד צפוי במחזור'}}</h2><RouterLink v-if="compact&&allLink" :to="allLink" class="text-link">לכל החודש ←</RouterLink></div>
+    <div class="upcoming-heading"><h2>{{compact?'חיובים והכנסות קרובים':'מה עוד צפוי במחזור'}}</h2><RouterLink v-if="compact&&allLink" :to="allLink" class="text-link tap-target">כל הצפוי במחזור ←</RouterLink></div>
     <p v-if="!compact" class="upcoming-hint">{{fmtILSRound(totalIn)}} צפויים להיכנס · {{fmtILSRound(totalOut)}} לצאת</p>
     <p v-if="!visible.length" class="upcoming-empty">אין תנועות קבועות צפויות עד סוף המחזור.</p>
     <ol v-else>
-      <li v-for="(event,index) in visible" :key="event.date+'-'+event.label+'-'+index"><time :datetime="event.date">{{fmtDayMonth(event.date)}}</time><span class="upcoming-name">{{event.label}}</span><span class="upcoming-amount" :class="{'is-income':event.amount>0}">{{fmtSigned(event.amount)}}</span></li>
+      <li v-for="(event,index) in visible" :key="event.date+'-'+event.label+'-'+index"><time :datetime="event.date">{{fmtRelativeDay(event.date)}}</time><span class="upcoming-name">{{event.label}}</span><span class="upcoming-amount" :class="{'is-income':event.amount>0}">{{fmtSigned(event.amount)}}</span></li>
     </ol>
     <p v-if="!compact&&visible.length" class="upcoming-hint mt-4">מועדים וסכומים משוערים לפי הנתונים הקיימים.</p>
   </section>

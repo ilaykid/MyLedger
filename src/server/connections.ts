@@ -4,7 +4,7 @@ import { prisma } from '../db.js';
 import { CONFIG_PATH } from '../config.js';
 import { isProtected, protect } from '../secrets.js';
 import { hasProfile, removeProfile } from '../browser.js';
-import { runScrapeAll } from '../scrape-runner.js';
+import { runScrapeAll, type ScrapeResult } from '../scrape-runner.js';
 import { applyCategoryRules } from '../categorize.js';
 import { detectRecurring } from '../recurring.js';
 import { toISODate } from '../cycle.js';
@@ -132,9 +132,19 @@ export async function listOrphanAccounts() {
   const config = readConfig();
   const configured = new Set(config.accounts.map((a) => a.company));
   const accounts = await prisma.account.findMany();
-  return accounts
-    .filter((a) => !configured.has(a.institution))
-    .map((a) => ({ id: a.id, institution: a.institution, displayName: a.displayName, lastFour: a.lastFour }));
+  const orphans = accounts.filter((a) => !configured.has(a.institution));
+  // The count is what a delete would destroy, so the confirmation can say it.
+  const counts = await Promise.all(
+    orphans.map((a) => prisma.transaction.count({ where: { accountId: a.id } })),
+  );
+  return orphans.map((a, i) => ({
+    id: a.id,
+    institution: a.institution,
+    displayName: a.displayName,
+    lastFour: a.lastFour,
+    lifecycle: a.lifecycle,
+    transactions: counts[i],
+  }));
 }
 
 export async function upsertConnection(input: {
@@ -191,6 +201,8 @@ export interface ScrapeJob {
   log: string[];
   failures: number;
   error: string | null;
+  /** One entry per provider attempted, so the page can explain each outcome. */
+  results: ScrapeResult[];
 }
 
 let currentJob: ScrapeJob | null = null;
@@ -216,6 +228,7 @@ export function startScrape(companies: string[]): ScrapeJob {
     log: [],
     failures: 0,
     error: null,
+    results: [],
   };
   currentJob = job;
 
@@ -232,11 +245,14 @@ export function startScrape(companies: string[]): ScrapeJob {
           job.log.push(line);
           if (job.log.length > 200) job.log.shift();
         },
+        onResult: (result) => {
+          job.results.push(result);
+        },
       });
 
-      job.log.push('מקטלג תנועות חדשות…');
+      job.log.push('מסווג תנועות חדשות…');
       const cat = await applyCategoryRules();
-      job.log.push(`קוטלגו ${cat.categorized} תנועות`);
+      job.log.push(cat.categorized === 1 ? 'תנועה אחת סווגה' : `${cat.categorized} תנועות סווגו`);
 
       job.log.push('מזהה הוצאות קבועות…');
       const rec = await detectRecurring();

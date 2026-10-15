@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * The credit-card float: money already spent that has not left the account yet.
+ * Card charges not yet settled (the "float"): money already spent that has not left the account yet.
  * This is the single biggest reason an Israeli bank balance flatters you, so it
  * gets its own panel rather than being buried in a total.
  */
@@ -16,8 +16,8 @@ const sorted = computed(() => [...props.data.cardFloat.byAccount].sort((a, b) =>
 
 <template>
   <section class="card p-5">
-    <h2 class="section-title">צף האשראי</h2>
-    <p class="section-hint mt-1">כבר הוצאת — עוד לא ירד מהחשבון.</p>
+    <h2 class="section-title">חיובי אשראי שעוד לא ירדו</h2>
+    <p class="section-hint mt-1">כבר הוצא באשראי — עוד לא ירד מהעו״ש.</p>
 
     <p class="tnum mt-3 text-3xl font-bold">{{ fmtILSRound(data.cardFloat.total) }}</p>
 

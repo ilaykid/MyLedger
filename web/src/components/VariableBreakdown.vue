@@ -79,7 +79,7 @@ function budgetPct(row: Cashflow['variableByCategory'][number]): number | null {
           <!-- The budget says one thing, history says another. That gap is the
                finding: a budget nobody meets is a number, not a plan. -->
           <span v-if="r.budget && r.forecast > r.budget" :style="{ color: 'var(--status-warning)' }">
-            · לפי ההיסטוריה תחרוג מהתקציב ב-{{ fmtILSRound(r.forecast - r.budget) }}
+            · לפי ההיסטוריה צפויה חריגה מהתקציב של {{ fmtILSRound(r.forecast - r.budget) }}
           </span>
         </p>
       </li>

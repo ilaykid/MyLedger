@@ -62,7 +62,7 @@ onMounted(load);
 <div>
 <p class="eyebrow">תמונה שאפשר לסמוך עליה</p>
 <h1>איכות הנתונים</h1>
-<p>ממצאים לבדיקה, המקורות שלהם וההחלטות שכבר קיבלת.</p>
+<p>ממצאים לבדיקה, המקורות שלהם וההחלטות שכבר התקבלו.</p>
 </div>
 <button class="btn btn-ghost" :disabled="loading" @click="load">בדיקה מחדש</button>
 </div>
@@ -76,7 +76,7 @@ onMounted(load);
 <p class="settlement-note">מחזורי חיוב מ־{{fmtDate(data.since)}}. כל העסקאות שהושלמו במועד החיוב נכללות, גם אם נקנו קודם; זיכויים מופחתים מהסכום. השוואה באותו מטבע וחברת אשראי, עד 3 ימים ממועד החיוב. סכום שלילי הוא חיוב.</p>
 <label class="statement-filter">מועד חיוב <select v-model="statementMonth" class="field"><option value="">כל התקופה</option><option v-for="month in statementMonths" :key="month" :value="month">{{new Date(month+'-01T12:00:00').toLocaleDateString('he-IL',{month:'long',year:'numeric'})}}</option></select></label>
 <article v-for="s in visibleStatements" :key="s.id" class="statement-row">
-<div class="statement-title"><div><h3>{{s.account}}</h3><p>{{fmtDate(s.date)}} · {{s.count===1?'עסקה אחת':s.count+' עסקאות'}}</p></div><span class="statement-status" :class="{'needs-review':s.status==='review'}">{{s.status==='matched'?'תואם בדיוק':s.status==='balanced'?'נטו אפס':'לבדיקה'}}</span></div>
+<div class="statement-title"><div><h3>{{s.account}}</h3><p>{{fmtDate(s.date)}} · {{s.count===1?'עסקה אחת':s.count+' עסקאות'}}</p></div><span class="statement-status" :class="{'needs-review':s.status==='review'}">{{s.status==='matched'?'תואם בדיוק':s.status==='balanced'?'מתקזז לאפס':'לבדיקה'}}</span></div>
 <dl class="statement-equation"><div><dt>נטו בכרטיס</dt><dd>{{money(s.cardAmount,s.currency)}}</dd></div><div><dt>{{s.status==='review'?'תנועה אפשרית בבנק':'בבנק'}}</dt><dd>{{money(s.bankAmount,s.currency)}}</dd></div><div><dt>הפרש</dt><dd>{{s.difference===null?'—':money(s.difference,s.currency)}}</dd></div></dl>
 <p class="settlement-note">{{s.reason}}<span v-if="s.bankDate&&s.bankDate!==s.date"> תאריך בבנק: {{fmtDate(s.bankDate)}}.</span></p>
 <div class="statement-links"><RouterLink :to="s.href" class="text-link">עסקאות הכרטיס ←</RouterLink><RouterLink v-if="s.bankId" :to="'/transactions?transaction='+s.bankId" class="text-link">התנועה בבנק ←</RouterLink></div>
@@ -85,8 +85,8 @@ onMounted(load);
 </details>
 </section>
 <div class="flex flex-wrap items-center justify-between gap-3">
-<h2 class="font-bold">{{data.items.length}} ממצאים פתוחים</h2>
-<RouterLink to="/connections" class="text-link">לחשבונות ולסנכרון ←</RouterLink>
+<h2 class="font-bold">{{data.items.length===1?'ממצא פתוח אחד':data.items.length+' ממצאים פתוחים'}}</h2>
+<RouterLink to="/connections" class="text-link">חשבונות וחיבורים ←</RouterLink>
 </div>
 <SyncAlerts :issues="health?.issues.filter(i=>i.severity!=='info'&&!['material','coverage_review'].includes(i.kind))??[]"/>
 <details v-if="health?.issues.some(i=>i.severity==='info')" class="fold"><summary>מידע נוסף על החשבונות</summary><SyncAlerts :issues="health.issues.filter(i=>i.severity==='info')"/></details>
@@ -95,7 +95,7 @@ onMounted(load);
 <summary>
 <div class="flex flex-wrap justify-between gap-3">
 <div>
-<span class="eyebrow">{{item.kind==='material'?'החלטה מהותית':'התאמה לבדיקה'}} · {{item.count===1?'תנועה אחת':item.count+' תנועות'}}</span>
+<span class="eyebrow">{{item.kind==='material'?'תנועה גדולה שצריך לסווג':'פער לבדיקה'}} · {{item.count===1?'תנועה אחת':item.count+' תנועות'}}</span>
 <h3 class="font-bold">{{item.title}}</h3><p v-if="item.evidence[0]" class="quality-preview">{{item.evidence[0].description}} · {{fmtDate(item.evidence[0].date)}}<span v-if="item.count>1"> ועוד</span></p>
 </div>
 <div class="text-xl tnum font-semibold">{{fmtILS(item.amount)}}</div>
@@ -118,7 +118,7 @@ onMounted(load);
 </div></details>
 <div v-if="!data.items.length" class="card empty-state">
 <h2>אין ממצאים פתוחים</h2>
-<p>מצב הסנכרון מופיע למעלה. הבדיקה אינה מחליפה התאמה לדוחות הבנק.</p>
+<p>הכול מתאים. נבדוק שוב בעדכון הבא.</p>
 </div>
 <details v-if="data.decisions.length" class="fold">
 <summary>החלטות קודמות · {{data.decisions.length}}</summary>
@@ -133,8 +133,9 @@ onMounted(load);
 </template>
 <AppDialog :open="!!selected" title="תיעוד הבדיקה" @close="selected=null">
 <p class="text-sm muted">מה מסביר את הפער? ההחלטה נשמרת לממצא הזה בלבד; נתונים חדשים ייבדקו שוב.</p>
-<label class="block mt-4 text-sm">הסבר לבדיקה<textarea v-model="note" class="field w-full mt-2" rows="3" placeholder="למשל: העברה בין שני חשבונות שלי"/>
+<label class="block mt-4 text-sm">הסבר לבדיקה<textarea v-model="note" class="field w-full mt-2" rows="3" aria-describedby="quality-note-hint" placeholder="למשל: העברה בין שני חשבונות שלי"/>
 </label>
+<p id="quality-note-hint" class="mt-1 text-xs muted">לפחות 3 תווים<span v-if="note.trim().length>0&&note.trim().length<3"> · עוד {{3-note.trim().length}}</span></p>
 <p v-if="error" class="error-banner mt-3">{{error}}</p>
 <button class="btn btn-primary mt-4" :disabled="busy||note.trim().length<3" @click="resolve">{{busy?'שומר…':'אישור ושמירה'}}</button>
 </AppDialog>

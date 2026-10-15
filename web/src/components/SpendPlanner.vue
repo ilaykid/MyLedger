@@ -33,21 +33,22 @@ const breakEven = computed(() => Math.max(0, props.data.dailyAllowance));
 const breakEvenPct = computed(() => Math.min(100, (breakEven.value / maxDaily.value) * 100));
 
 const tone = computed(() => {
-  if (leftover.value < 0) return { color: 'var(--status-critical)', icon: '🔴', text: 'התרחיש חורג מהמסגרת המחושבת' };
+  if (leftover.value < 0) return { color: 'var(--status-critical)', icon: '🔴', text: 'בתרחיש הזה ההוצאות יעברו את מה שנשאר להוציא' };
   // Less than two days of normal spending left over is "on the edge".
   if (leftover.value < props.data.variable.dailyBurn * 2)
     return { color: 'var(--status-warning)', icon: '⚠️', text: 'בתרחיש הזה נשאר מרווח קטן' };
-  return { color: 'var(--status-good)', icon: '✅', text: 'התרחיש נשאר בתוך המסגרת המחושבת' };
+  return { color: 'var(--status-good)', icon: '✅', text: 'בתרחיש הזה נשאר מרווח עד סוף המחזור' };
 });
 
 const basis = computed(() => props.data.variable.forecastBasis ?? []);
+const daysPhrase = computed(() => (daysRemaining.value === 1 ? 'ביום שנותר' : `ב-${daysRemaining.value} הימים שנותרו`));
 </script>
 
 <template>
   <section class="card p-5">
     <h2 class="section-title">תכנון עד סוף המחזור</h2>
     <p class="section-hint mt-1">
-      בדקו איך הוצאה יומית תשפיע על המסגרת ב-{{ daysRemaining }} הימים שנותרו. זהו תרחיש חישובי, ולא הבטחה ליתרת הבנק.
+      בדקו איך הוצאה יומית תשפיע על מה שנשאר להוציא {{ daysPhrase }}. זהו תרחיש חישובי, ולא הבטחה ליתרה בעו״ש.
     </p>
 
     <p v-if="limited" class="mt-3 text-xs" :style="{color:'var(--status-warning)'}">החישוב מבוסס על נתונים חלקיים ועשוי להשתנות לאחר הבדיקה.</p>
@@ -86,7 +87,7 @@ const basis = computed(() => props.data.variable.forecastBasis ?? []);
 
     <div aria-live="polite" class="mt-4 rounded-xl p-3.5" :style="{ background: 'var(--surface-sunken)' }">
       <div class="flex items-baseline justify-between gap-3">
-        <span class="text-sm" :style="{ color: 'var(--text-secondary)' }">מסגרת בתרחיש הזה</span>
+        <span class="text-sm" :style="{ color: 'var(--text-secondary)' }">נשאר בסוף המחזור בתרחיש הזה</span>
         <span class="tnum text-xl font-bold" :style="{ color: leftover < 0 ? 'var(--status-critical)' : 'var(--text-primary)' }">
           {{ fmtILSRound(leftover) }}
         </span>
@@ -101,16 +102,16 @@ const basis = computed(() => props.data.variable.forecastBasis ?? []);
         איך חושב הקצב הטיפוסי: {{ fmtILSRound(data.variable.dailyBurn) }} ליום
       </summary>
       <p class="mt-2 leading-5" :style="{ color: 'var(--text-muted)' }">
-        זהו החציון של ההוצאות המשתנות בכל חודש מלא — לא ממוצע שמאפשר לחודש חריג להשתלט על התחזית.
+        זהו החציון של ההוצאות המשתנות בכל מחזור מלא — לא ממוצע שמאפשר למחזור חריג להשתלט על התחזית.
       </p>
       <ul class="mt-2 space-y-1">
         <li v-for="row in basis" :key="row.start" class="flex items-center justify-between gap-3">
           <span>{{ fmtMonth(row.start.slice(0, 7)) }}</span>
-          <span class="tnum">{{ fmtILSRound(row.total) }} בחודש · {{ fmtILSRound(row.daily) }} ליום</span>
+          <span class="tnum">{{ fmtILSRound(row.total) }} במחזור · {{ fmtILSRound(row.daily) }} ליום</span>
         </li>
       </ul>
       <p v-if="data.variable.dailyBurn > data.dailyAllowance" class="mt-2 font-medium" :style="{ color: 'var(--status-warning)' }">
-        כרגע התזרים מאפשר רק {{ fmtILSRound(data.dailyAllowance) }} ליום; הפער הוא התרעה, לא הנחה שתוציא את הקצב ההיסטורי.
+        כרגע נשאר להוציא רק {{ fmtILSRound(data.dailyAllowance) }} ליום; הפער הוא התרעה, לא הנחה שההוצאות ימשיכו בקצב ההיסטורי.
       </p>
     </details>
   </section>

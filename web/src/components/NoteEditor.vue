@@ -36,7 +36,7 @@ const scopes = computed(() => {
   if (isInstallment.value) {
     options.push({ value: 'plan', label: `כל ${props.txn.installmentTotal} התשלומים` });
   }
-  options.push({ value: 'merchant', label: 'כל התנועות מהספק' });
+  options.push({ value: 'merchant', label: 'כל התנועות מבית העסק' });
   return options;
 });
 
@@ -99,7 +99,7 @@ function save() {
       {{ effective.text }}
       <span
         v-if="sourceBadge[effective.source]"
-        :title="effective.source === 'plan' ? 'חלה על כל תשלומי הרכישה' : 'חלה על כל התנועות מהספק'"
+        :title="effective.source === 'plan' ? 'חלה על כל תשלומי הרכישה' : 'חלה על כל התנועות מבית העסק'"
         >{{ sourceBadge[effective.source] }}</span
       >
     </p>

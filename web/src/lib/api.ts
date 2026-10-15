@@ -297,7 +297,15 @@ export interface Connection {
 
 export interface ConnectionsResponse {
   connections: Connection[];
-  orphanAccounts: Array<{ id: string; institution: string; displayName: string; lastFour: string }>;
+  orphanAccounts: Array<{
+    id: string;
+    institution: string;
+    displayName: string;
+    lastFour: string;
+    lifecycle?: 'active' | 'dormant' | 'closed';
+    /** What deleting it would destroy */
+    transactions?: number;
+  }>;
   providers: ProviderInfo[];
 }
 
@@ -319,6 +327,31 @@ export interface ScrapeJob {
   log?: string[];
   failures?: number;
   error?: string | null;
+  /** One entry per provider attempted in this run */
+  results?: ScrapeResult[];
+}
+
+/** Mirrors ScrapeCause in src/scrape-runner.ts */
+export type ScrapeCause =
+  | 'invalid_password'
+  | 'change_password'
+  | 'blocked'
+  | 'slow'
+  | 'otp'
+  | 'account_blocked'
+  | 'unknown';
+
+export interface ScrapeResult {
+  company: string;
+  label: string;
+  ok: boolean;
+  inserted?: number;
+  skipped?: number;
+  cause?: ScrapeCause;
+  /** The scraper's machine-readable code, e.g. INVALID_PASSWORD */
+  errorType?: string;
+  /** Hebrew explanation from the server */
+  hint?: string;
 }
 
 export interface LlmStatus {
@@ -493,7 +526,7 @@ export interface StandingNote {
 }
 
 export interface TxnPage {
-  summary: {income:number;expense:number;net:number;basis:string};
+  summary: {income:number;expense:number;net:number;basis:string;transfersExcluded?:boolean};
   items: Txn[];
   total: number;
   page: number;
@@ -507,6 +540,14 @@ export interface Rule {
   priority: number;
   categoryId: string;
   category: CategoryRef;
+}
+
+/** Shown when the request never reached the local API at all. */
+export const LOCAL_SERVER_DOWN = 'השרת המקומי לא עונה. ודאו ש-MyLedger פועל במחשב ונסו שוב.';
+
+/** A thrown value as a sentence for the person, never "TypeError: …". */
+export function errorText(error: unknown, fallback = 'הפעולה לא הושלמה. נסו שוב.'): string {
+  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -523,11 +564,21 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   // "detect recurring", "send test message", and so on.
   if (init?.body != null) headers['content-type'] = 'application/json';
 
-  const res = await fetch(url, { ...init, headers, signal: init?.signal ?? AbortSignal.timeout(45_000) });
+  let res: Response;
+  try {
+    res = await fetch(url, { ...init, headers, signal: init?.signal ?? AbortSignal.timeout(45_000) });
+  } catch (err) {
+    // A caller that aborted on purpose (navigating away, a newer request)
+    // keeps its AbortError so it can tell that apart from a real failure.
+    if (init?.signal?.aborted) throw err;
+    // Otherwise "TypeError: Failed to fetch" or a timeout: the local server
+    // is not answering, which is the one thing the person can act on.
+    throw new Error(LOCAL_SERVER_DOWN);
+  }
   if (!res.ok) {
     const body = await res.text().catch(() => '');
     let message = 'הפעולה לא הושלמה. נסו שוב.';
-    try { const parsed = JSON.parse(body); message = parsed.message ?? (parsed.error === 'validation' ? 'בדקו את השדות שסומנו ונסו שוב.' : parsed.error) ?? message; } catch { /* non-JSON error */ }
+    try { const parsed = JSON.parse(body); message = parsed.message ?? (parsed.error === 'validation' ? 'חלק מהפרטים לא תקינים. בדקו אותם ונסו שוב.' : parsed.error) ?? message; } catch { /* non-JSON error */ }
     throw new Error(message === 'internal error' ? 'אירעה שגיאה בשרת. הנתונים לא נשמרו.' : message);
   }
   if (res.status === 204) return undefined as T;
@@ -540,7 +591,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return value as T;
 }
 
-export interface Preview { count:number; amount:number; locked?:number; conflicts?:number; samples:Array<{id:string;description:string;amount:number}> }
+export interface Preview { count:number; amount:number; locked?:number; conflicts?:number; claimable?:number; samples:Array<{id:string;description:string;amount:number}> }
 export interface QualityItem { key:string;kind:string;title:string;detail:string;amount:number;count:number;href:string;canResolve:boolean;evidence:Array<{id:string;description:string;amount:number;date:string}> }
 export interface Settlement {id:string;account:string;date:string;currency:string;count:number;cardAmount:number;bankAmount:number|null;difference:number|null;bankId:string|null;bankDate:string|null;href:string;status:'matched'|'review'|'balanced';reason:string}
 export interface QualityResponse {items:QualityItem[];settlements:Settlement[];since:string;decisions:Array<{key:string;note:string;createdAt:string}>}
@@ -568,6 +619,8 @@ export const api = {
   transactions: (params: {
     month?: string;
     start?:string;end?:string;chargeDate?:string;min?:number;max?:number;status?:string;currency?:string;flow?:string;transaction?:string;
+    /** 'exclude' leaves internal transfers out of the summary (not the list) when no flow is filtered. */
+    summaryTransfers?: 'include' | 'exclude';
     accountId?: string;
     categoryId?: string;
     uncategorized?: boolean;
@@ -577,7 +630,7 @@ export const api = {
     pageSize?: number;
   }) => {
     const qs = new URLSearchParams();
-    for (const key of ['start','end','chargeDate','min','max','status','currency','flow','transaction'] as const) if(params[key] !== undefined && params[key] !== '') qs.set(key,String(params[key]));
+    for (const key of ['start','end','chargeDate','min','max','status','currency','flow','transaction','summaryTransfers'] as const) if(params[key] !== undefined && params[key] !== '') qs.set(key,String(params[key]));
     if (params.month) qs.set('month', params.month);
     if (params.accountId) qs.set('accountId', params.accountId);
     if (params.uncategorized) qs.set('uncategorized', 'true');
@@ -650,6 +703,12 @@ export const api = {
     request<{ rule: Rule; pattern: string; applied: number }>('/api/rules/from-transaction', {
       method: 'POST',
       body: JSON.stringify({ transactionId, categoryId, preview }),
+    }),
+  /** Runs only this rule over uncategorised history; `categorized` is exactly what it took. */
+  applyRule: (id: string, preview = false) =>
+    request<{ scanned: number; categorized: number; changeId?: string | null }>(`/api/rules/${id}/apply`, {
+      method: 'POST',
+      body: JSON.stringify({ preview }),
     }),
   applyRules: (recategorize: boolean, preview = false) =>
     request<{ scanned: number; categorized: number; samples?: Array<{id:string;description:string;amount:number}> }>('/api/rules/apply', {
@@ -749,3 +808,34 @@ export const api = {
       body: JSON.stringify({ kind }),
     }),
 };
+
+/** What is waiting in the review hub ("לטיפול"), per tab. */
+export interface ReviewCounts {
+  /** Transactions waiting for a category (or a confirmation) */
+  classify: number;
+  /** Open data-quality findings */
+  quality: number;
+}
+
+/**
+ * Shared and cached, because both the header badge and the hub ask for it and
+ * each answer costs two server reports. Any write drops the cache, so a count
+ * never lags behind something the person just did.
+ */
+let reviewCountsCache: { at: number; value: Promise<ReviewCounts> } | null = null;
+if (typeof window !== 'undefined') {
+  window.addEventListener('ledger:changed', () => { reviewCountsCache = null; });
+  window.addEventListener('ledger:undone', () => { reviewCountsCache = null; });
+}
+
+export function reviewCounts(maxAgeMs = 60_000): Promise<ReviewCounts> {
+  if (reviewCountsCache && Date.now() - reviewCountsCache.at < maxAgeMs) return reviewCountsCache.value;
+  const value = Promise.all([api.dailyReview('daily'), api.quality()]).then(([daily, quality]) => ({
+    classify: daily.cards.filter((c) => c.transaction).length + daily.remaining.count,
+    quality: quality.items.length,
+  }));
+  reviewCountsCache = { at: Date.now(), value };
+  // A failure is not worth remembering - the next caller should try again.
+  value.catch(() => { if (reviewCountsCache?.value === value) reviewCountsCache = null; });
+  return value;
+}

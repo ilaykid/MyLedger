@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';
 import type { BreakdownSideData, BreakdownLine } from '../lib/api';
-import { fmtILSRound, fmtDayMonth } from '../lib/format';
+import { fmtILSRound, fmtDayMonth, fmtCount } from '../lib/format';
 const props = defineProps<{ expense: BreakdownSideData; month: string }>();
 const detailPanel = ref<HTMLElement | null>(null);
 const selected = ref<string | null>(null), search = ref('');
@@ -29,7 +29,7 @@ async function select(line: BreakdownLine) {
       <button v-for="line in lines" :key="key(line)" class="expense-card" :class="{active:selected===key(line)}" :aria-pressed="selected===key(line)" aria-controls="category-detail" @click="select(line)">
         <span class="category-top"><span class="category-icon" aria-hidden="true">{{line.icon || '◌'}}</span><span>{{line.name}}</span><span class="category-arrow" aria-hidden="true">{{selected===key(line)?'−':'+'}}</span></span>
         <strong class="tnum">{{fmtILSRound(line.amount)}}</strong>
-        <span class="category-meta">{{line.count}} תנועות · {{Math.round(line.share*100)}}% מההוצאות</span>
+        <span class="category-meta">{{fmtCount(line.count,'תנועה אחת','תנועות')}} · {{Math.round(line.share*100)}}% מההוצאות</span>
         <span class="category-track" aria-hidden="true"><span :style="{width:Math.min(100,Math.max(0,line.share*100))+'%'}"></span></span>
         <span v-if="line.budget && line.budget>0" class="category-budget" :class="{over:line.amount>line.budget}">{{line.amount>line.budget?'מעל התקציב ב־':'נותרו בתקציב '}}{{fmtILSRound(Math.abs(line.budget-line.amount))}}</span>
         <span v-else class="category-budget">{{line.categoryId?'לצפייה בהוצאות':'כדאי להתחיל מסיווג התנועות האלה'}}</span>
@@ -37,7 +37,7 @@ async function select(line: BreakdownLine) {
     </div>
     <aside ref="detailPanel" id="category-detail" class="category-detail" aria-live="polite">
       <template v-if="active">
-        <header class="detail-heading"><div><span class="eyebrow">{{active.count}} תנועות בחודש</span><h3>{{active.icon}} {{active.name}}</h3></div><strong class="tnum">{{fmtILSRound(active.amount)}}</strong></header>
+        <header class="detail-heading"><div><span class="eyebrow">{{fmtCount(active.count,'תנועה אחת','תנועות')}} בחודש</span><h3>{{active.icon}} {{active.name}}</h3></div><strong class="tnum">{{fmtILSRound(active.amount)}}</strong></header>
         <label class="sr-only" for="category-search">חיפוש בתוך הקטגוריה</label><input id="category-search" v-model="search" type="search" class="field w-full" placeholder="חיפוש בתוך הקטגוריה…"/>
         <p class="detail-hint">{{active.items?'מהחדש לישן':'התנועות הגדולות בקטגוריה'}} · זיכויים מקטינים את הסכום</p>
         <ul class="category-items">

@@ -41,3 +41,4 @@ body{margin:0}button,a,input,select,summary{-webkit-tap-highlight-color:transpar
 .tnum { font-variant-numeric: tabular-nums; }
 
 @media(max-width:700px){.workspace-header-inner{min-height:70px}.page-heading h1{font-size:28px}.section-tabs{border-radius:18px;gap:2px}.section-tabs>a{padding:9px 12px;font-size:12px}.settlement-overview{padding:22px 18px;border-radius:22px}.settlement-intro h2{font-size:23px}.reconcile-mark{width:48px;height:48px;font-size:30px}.statement-equation{gap:8px}.statement-equation dd{font-size:14px}.settlement-details>summary span{display:block;margin-inline-start:18px}}
+.tap-target{display:inline-flex;align-items:center;min-height:44px}

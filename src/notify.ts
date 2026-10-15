@@ -1,11 +1,7 @@
 import 'dotenv/config';
-import { prisma } from './db.js';
-import * as summaries from './server/summaries.js';
-import { analyseSyncHealth } from './sync-health.js';
 import { getSettings } from './recurring.js';
 import { unprotect } from './secrets.js';
-import { buildDigest, digestForToday, type DigestKind } from './digests.js';
-import { escapeHtml as esc } from './html.js';
+import { composeDigest, digestForToday, type DigestKind } from './digests.js';
 import { safeErrorMessage } from './redact.js';
 
 /**
@@ -61,14 +57,14 @@ export async function isTelegramConfigured(): Promise<boolean> {
 }
 
 /** One recipient. Telegram has no multi-chat send, so this runs per chat. */
-async function postTo(token: string, chatId: string, text: string): Promise<string | null> {
+async function postTo(token: string, chatId: string, text: string, silent: boolean): Promise<string | null> {
   let res: Response;
   try {
     res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       redirect: 'error',
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' }),
+      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML', disable_notification: silent }),
       signal: AbortSignal.timeout(15_000),
     });
   } catch (err) {
@@ -100,6 +96,7 @@ async function postTo(token: string, chatId: string, text: string): Promise<stri
  */
 export async function sendTelegram(
   text: string,
+  options: { silent?: boolean } = {},
 ): Promise<{ sent: boolean; error?: string; delivered?: number; failures?: Array<{ chatId: string; error: string }> }> {
   const cfg = await telegramConfig();
   if (!cfg) {
@@ -108,7 +105,7 @@ export async function sendTelegram(
   }
 
   const results = await Promise.all(
-    cfg.chatIds.map(async (chatId) => ({ chatId, error: await postTo(cfg.token, chatId, text) })),
+    cfg.chatIds.map(async (chatId) => ({ chatId, error: await postTo(cfg.token, chatId, text, options.silent ?? false) })),
   );
   const failures = results
     .filter((r): r is { chatId: string; error: string } => r.error !== null)
@@ -123,75 +120,16 @@ export async function sendTelegram(
   return { sent: true, delivered, ...(failures.length > 0 ? { failures } : {}) };
 }
 
-const fmtILS = (agorot: number) =>
-  new Intl.NumberFormat('he-IL', { style: 'currency', currency: 'ILS', maximumFractionDigits: 0 }).format(
-    agorot / 100,
-  );
-
-/** Daily summary: yesterday's spending + budget alerts. */
-export async function buildDailySummary(): Promise<string> {
-  const now = new Date();
-  const yesterdayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-  const yesterdayTxns = await prisma.transaction.findMany({
-    where: {
-      date: { gte: yesterdayStart, lt: todayStart },
-      status: 'completed',
-      category: { isNot: { kind: 'transfer' } },
-    },
-    orderBy: { amount: 'asc' },
-    include: { category: { select: { name: true, icon: true } } },
-  });
-
-  const spent = yesterdayTxns.filter((t) => t.amount < 0).reduce((s, t) => s + -t.amount, 0);
-  const lines: string[] = [`<b>📒 MyLedger - סיכום יומי</b>`];
-
-  if (yesterdayTxns.length === 0) {
-    lines.push('אתמול לא נרשמו תנועות. 🎉');
-  } else {
-    lines.push(`אתמול ירדו <b>${fmtILS(spent)}</b> ב-${yesterdayTxns.filter((t) => t.amount < 0).length} תנועות:`);
-    for (const t of yesterdayTxns.slice(0, 8)) {
-      const icon = t.category?.icon ?? '❔';
-      lines.push(`${esc(icon)} ${esc(t.description)} - <b>${fmtILS(Math.abs(t.amount))}</b>`);
-    }
-    if (yesterdayTxns.length > 8) lines.push(`...ועוד ${yesterdayTxns.length - 8} תנועות`);
-  }
-
-  // Coverage problems come first - they mean the numbers above are incomplete.
-  const { issues } = await analyseSyncHealth();
-  const blocking = issues.filter((i) => i.severity === 'error');
-  if (blocking.length > 0) {
-    lines.push('', '<b>🔴 בעיות סנכרון:</b>');
-    for (const issue of blocking) lines.push(`• ${esc(issue.title)}`);
-  }
-
-  // Budget alerts (>=80% of monthly budget)
-  const budgets = await summaries.budgets(summaries.currentMonthKey());
-  const alerts = budgets.filter((b) => b.spent / b.budget >= 0.8);
-  if (alerts.length > 0) {
-    lines.push('', '<b>⚠️ התראות תקציב:</b>');
-    for (const b of alerts) {
-      const pct = Math.round((b.spent / b.budget) * 100);
-      lines.push(`${esc(b.icon)} ${esc(b.name)}: ${fmtILS(b.spent)} מתוך ${fmtILS(b.budget)} (${pct}%)`);
-    }
-  }
-
-  return lines.join('\n');
-}
-
 /**
  * Send whichever digest today calls for - monthly on the 1st, weekly on Sunday,
  * daily otherwise. Pass a kind to override (used by the "send now" buttons).
+ * A routine daily digest goes out without sound; see `Digest.silent`.
  */
-export async function sendDigest(kind?: DigestKind): Promise<{ sent: boolean; kind: DigestKind; error?: string }> {
+export async function sendDigest(
+  kind?: DigestKind,
+): Promise<{ sent: boolean; kind: DigestKind; silent: boolean; error?: string }> {
   const chosen = kind ?? digestForToday();
-  const text = await buildDigest(chosen);
-  const result = await sendTelegram(text);
-  return { ...result, kind: chosen };
-}
-
-/** @deprecated kept so existing callers keep working; use sendDigest(). */
-export async function sendDailySummary(): Promise<void> {
-  await sendDigest('daily');
+  const { text, silent } = await composeDigest(chosen);
+  const result = await sendTelegram(text, { silent });
+  return { ...result, kind: chosen, silent };
 }

@@ -22,7 +22,7 @@
  */
 import { computed, ref } from 'vue';
 import type { Cashflow, SpreadPlan } from '../lib/api.js';
-import { fmtDayMonth, fmtILSRound } from '../lib/format.js';
+import { fmtCount, fmtILSRound, fmtSigned } from '../lib/format.js';
 
 const props = defineProps<{ data: Cashflow; spreads?: SpreadPlan[]; month?: string }>();
 const emit = defineEmits<{ saveNote: [transactionId: string, note: string | null] }>();
@@ -42,21 +42,15 @@ const activeSpreads = computed(() =>
 );
 
 /**
- * The commitments still to be charged, itemised.
- *
- * "צפוי עוד ₪1,350" is a number you have to take on faith, and a forecast you
- * cannot audit is a forecast you quietly stop trusting. These are the same
- * events the timeline already plots, listed so the total can be checked against
- * its parts - and so a line that should not be there is visible rather than
- * merely suspected.
+ * The fixed charges still to come. "צפוי עוד ₪1,350" is a number you have to
+ * take on faith unless it can be opened up - but the planning page already
+ * lists every upcoming event once, so this links there instead of repeating it.
  */
 const upcomingFixed = computed(() =>
   props.data.upcoming
     .filter((e) => e.kind === 'fixed' && !e.actual)
     .sort((a, b) => a.date.localeCompare(b.date)),
 );
-
-const showUpcoming = ref(false);
 
 const editing = ref<string | null>(null);
 const draft = ref('');
@@ -108,27 +102,27 @@ const verdict = computed(() => {
     return {
       tone: 'var(--status-critical)',
       icon: '🔴',
-      text: 'יש התחייבויות קבועות בלי הכנסה קבועה שתכסה אותן.',
+      text: 'יש הוצאות קבועות בלי הכנסה קבועה שתכסה אותן.',
     };
   }
   if (coverage.value > 1) {
     return {
       tone: 'var(--status-critical)',
       icon: '🔴',
-      text: `ההתחייבויות גדולות מההכנסה הקבועה ב-${fmtILSRound(Math.abs(leftover.value))}. הפער נסגר מהכנסה משתנה — שלא הבטיחה להגיע.`,
+      text: 'ההוצאות הקבועות גדולות מההכנסה הקבועה. הפער נסגר מהכנסה משתנה — שלא הבטיחה להגיע.',
     };
   }
   if (coverage.value >= 0.85) {
     return {
       tone: 'var(--status-warning)',
       icon: '⚠️',
-      text: `כמעט כל ההכנסה הקבועה תפוסה. נשארים ${fmtILSRound(leftover.value)} לפני שנוגעים בהוצאות המשתנות.`,
+      text: 'כמעט כל ההכנסה הקבועה תפוסה עוד לפני ההוצאות המשתנות.',
     };
   }
   return {
     tone: 'var(--status-good)',
     icon: '✅',
-    text: `אחרי כל ההתחייבויות נשארים ${fmtILSRound(leftover.value)} מההכנסה הקבועה.`,
+    text: 'אחרי כל ההוצאות הקבועות נשאר מרווח מההכנסה הקבועה להוצאות המשתנות.',
   };
 });
 
@@ -145,7 +139,7 @@ const rows = computed(() => [
   },
   {
     key: 'fixed',
-    label: 'התחייבויות קבועות',
+    label: 'הוצאות קבועות',
     hue: 'var(--series-8)',
     total: commitments.value,
     solid: paid.value,
@@ -161,7 +155,7 @@ const rows = computed(() => [
   <section v-if="verdict" class="card p-5">
     <div class="flex flex-wrap items-baseline justify-between gap-2">
       <div>
-        <h2 class="section-title">המסגרת הקבועה</h2>
+        <h2 class="section-title">הכנסות קבועות מול הוצאות קבועות</h2>
         <p class="section-hint mt-0.5">מה שבטוח נכנס, מול מה שכבר מחויב לצאת</p>
       </div>
       <!-- Gated on `verdict`, not on the number: a month with no fixed income
@@ -215,33 +209,11 @@ const rows = computed(() => [
             <span aria-hidden="true">▨</span>
             {{ r.forecastLabel }} <span class="tnum">{{ fmtILSRound(r.forecast) }}</span>
           </span>
-          <!-- The forecast is only trustworthy if you can open it up -->
-          <button
-            v-if="r.key === 'fixed' && upcomingFixed.length"
-            class="underline"
-            :aria-expanded="showUpcoming"
-            @click="showUpcoming = !showUpcoming"
-          >
-            {{ showUpcoming ? 'הסתרה' : `מה עוד צפוי (${upcomingFixed.length})` }}
-          </button>
+          <!-- The forecast is only trustworthy if you can open it up: one list, on this page -->
+          <a v-if="r.key === 'fixed' && upcomingFixed.length" href="#upcoming" class="tap-target underline">
+            {{ fmtCount(upcomingFixed.length, 'חיוב קבוע אחד', 'חיובים קבועים') }} בדרך ←
+          </a>
         </div>
-
-        <ul
-          v-if="r.key === 'fixed' && showUpcoming"
-          class="mt-2 space-y-1 rounded-lg p-2.5"
-          :style="{ background: 'var(--surface-2)' }"
-        >
-          <li
-            v-for="e in upcomingFixed"
-            :key="`${e.date}-${e.label}`"
-            class="flex items-baseline justify-between gap-3 text-xs"
-          >
-            <span class="min-w-0 truncate" :style="{ color: 'var(--text-secondary)' }">
-              {{ fmtDayMonth(e.date) }} · {{ e.label }}
-            </span>
-            <span class="tnum shrink-0">{{ fmtILSRound(Math.abs(e.amount)) }}</span>
-          </li>
-        </ul>
       </li>
     </ul>
 
@@ -314,7 +286,7 @@ const rows = computed(() => [
       }"
     >
       <span class="text-sm" :style="{ color: 'var(--text-secondary)' }">
-        <span aria-hidden="true">🐷</span> הפקדת לחיסכון
+        <span aria-hidden="true">🐷</span> הופקד לחיסכון
       </span>
       <span class="text-sm">
         <span
@@ -336,12 +308,12 @@ const rows = computed(() => [
       class="mt-4 flex items-baseline justify-between gap-3 border-t pt-3.5"
       :style="{ borderColor: 'var(--gridline)' }"
     >
-      <span class="text-sm" :style="{ color: 'var(--text-secondary)' }">נשאר אחרי התחייבויות</span>
+      <span class="text-sm" :style="{ color: 'var(--text-secondary)' }">הכנסות קבועות פחות הוצאות קבועות</span>
       <span
         class="tnum text-lg font-bold"
         :style="{ color: covered ? 'var(--delta-up)' : 'var(--delta-down)' }"
       >
-        {{ (covered ? '' : '−') + fmtILSRound(Math.abs(leftover)) }}
+        {{ fmtSigned(leftover) }}
       </span>
     </div>
     <p v-if="verdict" class="mt-1.5 text-xs" :style="{ color: 'var(--text-secondary)' }">

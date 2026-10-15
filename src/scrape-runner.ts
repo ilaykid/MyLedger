@@ -40,8 +40,8 @@ export async function scrapeOne(
 
   if (!hasProfile(cfg.company)) {
     console.log(
-      `  note: no saved browser profile for ${cfg.company}. If this fails on an SMS/OTP ` +
-        `challenge, run "npm run login -- ${cfg.company}" once first.`,
+      `  הערה: אין פרופיל דפדפן שמור ל-${cfg.company}. אם העדכון ייעצר על קוד SMS, ` +
+        `הריצו פעם אחת npm run login -- ${cfg.company} בטרמינל בתיקיית MyLedger.`,
     );
   }
 
@@ -95,7 +95,7 @@ export async function scrapeOne(
       LOGIN_SUCCESS: 'התחברות הצליחה',
       LOGIN_FAILED: 'התחברות נכשלה',
       CHANGE_PASSWORD: 'נדרשת החלפת סיסמה',
-      END_SCRAPING: 'סיים למשוך',
+      END_SCRAPING: 'קריאת הנתונים הסתיימה',
       TERMINATING: 'מסיים',
     };
     const attempt = async () => {
@@ -140,7 +140,7 @@ export async function scrapeOne(
 
     const accounts = (result.accounts ?? []) as unknown as ScrapedAccount[];
     if (accounts.length === 0) {
-      console.log('  warning: login succeeded but no accounts were returned');
+      console.log('  אזהרה: ההתחברות הצליחה אבל לא הוחזרו חשבונות');
     }
 
     const totals: IngestStats = { inserted: 0, updated: 0, pendingMatched: 0, pendingDropped: 0, skipped: 0 };
@@ -218,45 +218,90 @@ export class ScrapeFailure extends Error {
   }
 }
 
-/** Turn a scraper failure into something actionable rather than a raw code. */
-function explain(failure: ScrapeFailure): string | null {
+/**
+ * What went wrong, grouped by what the person should do about it. The
+ * scraper's own errorType stays machine-readable in the message (and in
+ * syncRun.error); this is the coarser grouping the Connections page acts on.
+ */
+export type ScrapeCause =
+  | 'invalid_password'
+  | 'change_password'
+  | 'blocked'
+  | 'slow'
+  | 'otp'
+  | 'account_blocked'
+  | 'unknown';
+
+export function classifyFailure(failure: ScrapeFailure): ScrapeCause {
   switch (failure.errorType) {
     case 'INVALID_PASSWORD':
-      return 'The provider rejected the credentials. Check the exact field names for this company in accounts.config.example.json - each one expects different fields.';
+      return 'invalid_password';
     case 'CHANGE_PASSWORD':
-      return 'The provider is forcing a password change. Log in manually in a browser, set a new password, then update accounts.config.json.';
+      return 'change_password';
+    case 'ACCOUNT_BLOCKED':
+      return 'account_blocked';
     case 'TIMEOUT':
     case 'GENERIC':
       // These two look identical from the outside but need opposite responses:
       // one wants a human at the keyboard, the other wants you to stop trying
       // for a while. Sending someone to do an interactive login while they are
       // sitting in a bot-protection queue just deepens the block.
-      if (looksBlocked(failure.detail)) {
-        return (
-          'The request never reached the provider - this is bot protection (a Cloudflare ' +
-          'waiting room), not a credentials problem. The retry already cleared the queue cookie ' +
-          'and failed again, so the block is still active. Wait ~10 minutes and run it once. ' +
-          'Repeated attempts extend the block rather than getting through it.'
-        );
-      }
-      if (looksSlow(failure.detail)) {
-        return (
-          'The provider site did not finish loading in time, twice. This is usually the site ' +
-          'being slow rather than anything wrong with the account - the next scheduled run will ' +
-          'most likely succeed. If it keeps happening at the same hour, try moving the schedule ' +
-          'or run it manually from the connections page.'
-        );
-      }
+      if (looksBlocked(failure.detail)) return 'blocked';
+      if (looksSlow(failure.detail)) return 'slow';
+      return 'otp';
+    default:
+      return 'unknown';
+  }
+}
+
+/**
+ * Turn a scraper failure into something actionable rather than a raw code.
+ * Hebrew, and pointing at the Connections page rather than at config files -
+ * that page can fix every one of these.
+ */
+function explain(failure: ScrapeFailure): string | null {
+  switch (classifyFailure(failure)) {
+    case 'invalid_password':
+      return 'האתר דחה את פרטי ההתחברות. בדקו אותם מול אתר הבנק או חברת האשראי ועדכנו אותם בעמוד "חשבונות וחיבורים" ← "עדכון פרטים".';
+    case 'change_password':
+      return 'האתר דורש להחליף סיסמה. היכנסו אליו בדפדפן, בחרו סיסמה חדשה ועדכנו אותה בעמוד "חשבונות וחיבורים" ← "עדכון פרטים".';
+    case 'blocked':
       return (
-        'Often an SMS/OTP or "new device" challenge that the scraper cannot answer. ' +
-        `Run "npm run login -- ${failure.company}", log in by hand, tick "remember this device", then retry. ` +
-        'To watch what happens, set SCRAPER_SHOW_BROWSER=true in .env.'
+        'הבקשה לא הגיעה לאתר — זו חסימה זמנית מפני רובוטים, לא בעיה בסיסמה. ' +
+        'ניסיון חוזר כבר נעשה ונכשל, כך שהחסימה עדיין פעילה. נסו שוב בעוד כ-10 דקות, פעם אחת: ' +
+        'ניסיונות חוזרים רק מאריכים את החסימה.'
       );
-    case 'ACCOUNT_BLOCKED':
-      return 'The account is blocked at the provider. This needs to be resolved with them directly.';
+    case 'slow':
+      return (
+        'האתר לא סיים להיטען בזמן, פעמיים. בדרך כלל האתר פשוט איטי ואין בעיה בחשבון — ' +
+        'העדכון המתוזמן הבא כנראה יצליח. אפשר גם לנסות שוב מעמוד "חשבונות וחיבורים".'
+      );
+    case 'otp':
+      return (
+        'כנראה נדרש אימות SMS או אישור "מכשיר חדש", ואי אפשר לענות עליו אוטומטית. ' +
+        `הריצו npm run login -- ${failure.company} בטרמינל בתיקיית MyLedger, היכנסו ידנית וסמנו "זכור את המכשיר", ואז נסו שוב.`
+      );
+    case 'account_blocked':
+      return 'החשבון חסום אצל הבנק או חברת האשראי. צריך לפתור את זה מולם ישירות.';
     default:
       return null;
   }
+}
+
+/** One provider's outcome, for the Connections page's result cards. */
+export interface ScrapeResult {
+  company: string;
+  label: string;
+  ok: boolean;
+  /** Set when ok */
+  inserted?: number;
+  skipped?: number;
+  /** Set when failed: what to do about it */
+  cause?: ScrapeCause;
+  /** The scraper's own machine-readable error type, e.g. INVALID_PASSWORD */
+  errorType?: string;
+  /** Hebrew explanation, when there is one */
+  hint?: string;
 }
 
 /**
@@ -272,6 +317,8 @@ export interface ScrapeOptions {
   /** Who asked, shown to whoever collides with this run. See scrape-lock.ts. */
   label?: string;
   onLog?: (line: string) => void;
+  /** Called once per provider actually attempted, with its outcome. */
+  onResult?: (result: ScrapeResult) => void;
 }
 
 export async function runScrapeAll(
@@ -281,17 +328,18 @@ export async function runScrapeAll(
   const options: ScrapeOptions = Array.isArray(onlyOrOptions)
     ? { only: onlyOrOptions, onLog: onLogArg }
     : (onlyOrOptions ?? { onLog: onLogArg });
-  const { only, force = false, label = 'הרצה', onLog = onLogArg } = options;
+  const { only, force = false, label = 'הרצה', onLog = onLogArg, onResult } = options;
 
   // Every entry point funnels through here, so this is the one place the lock
   // has to be taken for it to actually mean anything.
-  return withScrapeLock(label, () => runScrape(only, force, onLog));
+  return withScrapeLock(label, () => runScrape(only, force, onLog, onResult));
 }
 
 async function runScrape(
   only: string[] | undefined,
   force: boolean,
   onLog?: (line: string) => void,
+  onResult?: (result: ScrapeResult) => void,
 ): Promise<number> {
   const say = (line: string) => {
     console.log(line);
@@ -312,7 +360,7 @@ async function runScrape(
 
   say(
     `${selected.length} חשבונות, ${config.monthsBack} חודשים אחורה · ` +
-      `סיסמאות ${config.encrypted ? 'מוצפנות (DPAPI)' : 'בטקסט גלוי — הריצו npm run secure'}`,
+      `סיסמאות ${config.encrypted ? 'מוצפנות בחשבון Windows' : 'בטקסט גלוי — הריצו npm run secure'}`,
   );
 
   let failures = 0;
@@ -329,13 +377,13 @@ async function runScrape(
         const hoursSince = (Date.now() - last.getTime()) / 3_600_000;
         if (hoursSince < interval) {
           const nextIn = Math.ceil(interval - hoursSince);
-          say(`⏭ ${label}: נמשך לפני ${Math.floor(hoursSince)} שעות, הבא בעוד ~${nextIn} שעות`);
+          say(`⏭ ${label}: עודכן לפני ${Math.floor(hoursSince)} שעות, הבא בעוד ~${nextIn} שעות`);
           continue;
         }
       }
     }
 
-    say(`מושך מ${label}…`);
+    say(`מעדכן נתונים מ${label}…`);
     const syncRun = await prisma.syncRun.create({
       data: { company: accountCfg.company, status: 'running', trigger: label },
     });
@@ -352,6 +400,7 @@ async function runScrape(
         },
       });
       say(`✓ ${label}: ${totals.inserted} חדשות, ${totals.skipped} כבר קיימות`);
+      onResult?.({ company: accountCfg.company, label, ok: true, inserted: totals.inserted, skipped: totals.skipped });
     } catch (err) {
       failures++;
       const safe = safeErrorMessage(err, Object.values(accountCfg.credentials));
@@ -363,8 +412,17 @@ async function runScrape(
         say(`✗ ${label}: ${err.message}`);
         const hint = explain(err);
         if (hint) say(`  ${hint}`);
+        onResult?.({
+          company: accountCfg.company,
+          label,
+          ok: false,
+          cause: classifyFailure(err),
+          errorType: err.errorType,
+          hint: hint ?? undefined,
+        });
       } else {
         say(`✗ ${label}: ${safe}`);
+        onResult?.({ company: accountCfg.company, label, ok: false, cause: 'unknown' });
       }
     }
   }

@@ -10,21 +10,26 @@ const {settingsOnly=false}=defineProps<{settingsOnly?:boolean}>();
  * Credentials are write-only: this page can set them, never read them back. The
  * API returns only whether each field is present and encrypted.
  */
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import {
   api,
+  errorText,
   type Connection,
+  type ConnectionAccount,
   type ConnectionsResponse,
   type NotificationDetail,
   type ProviderInfo,
   type ScrapeJob,
+  type ScrapeResult,
   type Settings,
   type SyncIssue,
   type BackupStatus,
 } from '../lib/api.js';
-import { fmtILSRound } from '../lib/format.js';
+import { fmtDate, fmtILSRound } from '../lib/format.js';
 import SyncAlerts from '../components/SyncAlerts.vue';
+import AppDialog from '../components/AppDialog.vue';
+import AppIcon from '../components/AppIcon.vue';
 
 const route = useRoute();
 const data = ref<ConnectionsResponse | null>(null);
@@ -77,6 +82,133 @@ const selectedProvider = computed<ProviderInfo | null>(
 const banks = computed(() => data.value?.connections.filter((c) => c.type === 'bank') ?? []);
 const cards = computed(() => data.value?.connections.filter((c) => c.type === 'credit_card') ?? []);
 const running = computed(() => job.value?.status === 'running');
+
+/**
+ * One confirmation dialog for every destructive action on this page. Native
+ * confirm() could not say what would actually be lost, offer the gentler
+ * alternative, or show an error without losing the question.
+ */
+interface Confirmation {
+  title: string;
+  body: string;
+  confirmLabel: string;
+  danger?: boolean;
+  run: () => Promise<void>;
+  /** A safer choice offered next to the destructive one */
+  alternative?: { hint: string; label: string; run: () => Promise<void> };
+}
+const confirmation = ref<Confirmation | null>(null);
+const confirmBusy = ref(false);
+const confirmError = ref<string | null>(null);
+
+function ask(c: Confirmation) {
+  confirmError.value = null;
+  confirmation.value = c;
+}
+
+async function runConfirmed(run: () => Promise<void>) {
+  confirmBusy.value = true;
+  confirmError.value = null;
+  try {
+    await run();
+    confirmation.value = null;
+  } catch (e) {
+    confirmError.value = errorText(e);
+  } finally {
+    confirmBusy.value = false;
+  }
+}
+
+/** Counts that agree with their noun: "תנועה אחת", "2 תנועות". */
+const txnCount = (n: number) => (n === 1 ? 'תנועה אחת' : `${n.toLocaleString('he-IL')} תנועות`);
+
+/**
+ * A failed sync, per provider, as a cause and an action. The raw log is still
+ * there under "פירוט טכני", but nobody should have to read it to learn that the
+ * bank rejected a password.
+ */
+interface ResultView {
+  tone: 'good' | 'warning' | 'critical';
+  title: string;
+  body?: string;
+  /** A terminal command to show verbatim, left-to-right */
+  command?: string;
+  action?: { kind: 'edit' | 'retry'; label: string };
+}
+
+function connectionFor(company: string): Connection | undefined {
+  return data.value?.connections.find((c) => c.company === company);
+}
+
+function resultView(r: ScrapeResult): ResultView {
+  if (r.ok) {
+    const inserted = r.inserted ?? 0;
+    return {
+      tone: 'good',
+      title: inserted === 0 ? 'עודכן, אין תנועות חדשות' : inserted === 1 ? 'עודכן · תנועה חדשה אחת' : `עודכן · ${inserted} תנועות חדשות`,
+    };
+  }
+  const isCard = connectionFor(r.company)?.type === 'credit_card';
+  switch (r.cause) {
+    case 'invalid_password':
+      return {
+        tone: 'critical',
+        title: isCard ? 'חברת האשראי דחתה את פרטי ההתחברות' : 'הבנק דחה את פרטי ההתחברות',
+        body: 'בדקו את הפרטים מול האתר ועדכנו אותם כאן.',
+        action: { kind: 'edit', label: 'עדכון פרטים' },
+      };
+    case 'change_password':
+      return {
+        tone: 'critical',
+        title: 'האתר דורש להחליף סיסמה',
+        body: 'היכנסו לאתר בדפדפן, בחרו סיסמה חדשה ועדכנו אותה כאן.',
+        action: { kind: 'edit', label: 'עדכון פרטים' },
+      };
+    case 'blocked':
+      return {
+        tone: 'warning',
+        title: 'האתר חוסם זמנית — נסו שוב בעוד 10 דקות',
+        body: 'זו הגנה מפני רובוטים, לא בעיה בסיסמה. ניסיונות חוזרים עכשיו רק מאריכים את החסימה.',
+      };
+    case 'slow':
+      return {
+        tone: 'warning',
+        title: 'האתר לא נטען בזמן',
+        body: 'בדרך כלל האתר פשוט איטי ואין בעיה בחשבון. העדכון המתוזמן הבא כנראה יצליח.',
+        action: { kind: 'retry', label: 'ניסיון חוזר' },
+      };
+    case 'otp':
+      return {
+        tone: 'warning',
+        title: 'נדרש אימות SMS',
+        body: 'הריצו את הפקודה הזו בטרמינל בתיקיית MyLedger, היכנסו ידנית וסמנו "זכור את המכשיר", ואז נסו שוב:',
+        command: `npm run login -- ${r.company}`,
+        action: { kind: 'retry', label: 'ניסיון חוזר' },
+      };
+    case 'account_blocked':
+      return {
+        tone: 'critical',
+        title: isCard ? 'החשבון חסום אצל חברת האשראי' : 'החשבון חסום אצל הבנק',
+        body: 'צריך לפתור את זה מולם ישירות.',
+      };
+    default:
+      return {
+        tone: 'critical',
+        title: 'העדכון נכשל',
+        body: r.hint ?? 'אפשר לנסות שוב. אם זה חוזר, הפירוט הטכני למטה יעזור להבין מה קרה.',
+        action: { kind: 'retry', label: 'ניסיון חוזר' },
+      };
+  }
+}
+
+function resultAction(r: ScrapeResult, kind: 'edit' | 'retry') {
+  if (kind === 'retry') return runScrape([r.company]);
+  const connection = connectionFor(r.company);
+  if (connection) openEdit(connection);
+}
+
+const toneColor = (tone: ResultView['tone']) =>
+  tone === 'good' ? 'var(--status-good)' : tone === 'warning' ? 'var(--status-warning)' : 'var(--status-critical)';
 
 async function load() {
   try {
@@ -193,7 +325,7 @@ async function loadRecipients() {
 async function addRecipient() {
   const id = tgNewRecipient.value.trim();
   if (!/^\d+$/.test(id)) {
-    tgMessage.value = { ok: false, text: 'מזהה צ׳אט הוא מספר. לחצו "מי כתב לבוט" אחרי שהיא שולחת /start.' };
+    tgMessage.value = { ok: false, text: 'מזהה צ׳אט הוא מספר. אחרי שהנמען שולח /start לבוט, לחצו "איתור הצ׳אט שלי".' };
     return;
   }
   if (tgRecipients.value.includes(id)) {
@@ -205,7 +337,7 @@ async function addRecipient() {
   try {
     const probe = await api.testTelegramRecipient(id);
     if (!probe.sent) {
-      tgMessage.value = { ok: false, text: probe.error ?? 'ההודעה לא הגיעה, אז לא הוספתי.' };
+      tgMessage.value = { ok: false, text: probe.error ?? 'הודעת הבדיקה לא הגיעה, ולכן הנמען לא נוסף.' };
       return;
     }
     tgRecipients.value = (await api.saveTelegramRecipients([...tgRecipients.value, id])).chatIds;
@@ -213,29 +345,31 @@ async function addRecipient() {
     tgCandidates.value = [];
     tgMessage.value = { ok: true, text: 'נוסף, והודעת בדיקה כבר נשלחה לשם.' };
   } catch (e) {
-    tgMessage.value = { ok: false, text: e instanceof Error ? e.message : String(e) };
+    tgMessage.value = { ok: false, text: errorText(e) };
   } finally {
     tgBusy.value = false;
   }
 }
 
-async function removeRecipient(id: string) {
+function removeRecipient(id: string) {
   // The list cannot be emptied - a configured bot with nobody to send to is a
   // silent failure that looks exactly like everything working.
   if (tgRecipients.value.length <= 1) {
     tgMessage.value = { ok: false, text: 'זה הנמען האחרון. כדי להפסיק לגמרי, לחצו "ניתוק".' };
     return;
   }
-  if (!confirm('להסיר את הנמען הזה? הוא יפסיק לקבל את הסיכומים.')) return;
-  tgBusy.value = true;
-  try {
-    tgRecipients.value = (await api.saveTelegramRecipients(
-      tgRecipients.value.filter((r) => r !== id),
-    )).chatIds;
-    tgMessage.value = { ok: true, text: 'הוסר.' };
-  } finally {
-    tgBusy.value = false;
-  }
+  ask({
+    title: 'הסרת נמען',
+    body: `הצ׳אט ${id} יפסיק לקבל את הסיכומים. אפשר להוסיף אותו שוב בכל רגע.`,
+    confirmLabel: 'הסרה',
+    danger: true,
+    run: async () => {
+      tgRecipients.value = (await api.saveTelegramRecipients(
+        tgRecipients.value.filter((r) => r !== id),
+      )).chatIds;
+      tgMessage.value = { ok: true, text: 'הנמען הוסר.' };
+    },
+  });
 }
 
 async function saveTelegram() {
@@ -251,11 +385,11 @@ async function saveTelegram() {
     tgChatId.value = '';
     const result = await api.testTelegram();
     tgMessage.value = result.sent
-      ? { ok: true, text: 'נשמר ונשלחה הודעת בדיקה — בדוק בטלגרם.' }
+      ? { ok: true, text: 'נשמר ונשלחה הודעת בדיקה — בדקו בטלגרם.' }
       : { ok: false, text: `נשמר, אבל השליחה נכשלה: ${result.error ?? 'שגיאה לא ידועה'}` };
     await load();
   } catch (e) {
-    tgMessage.value = { ok: false, text: e instanceof Error ? e.message : String(e) };
+    tgMessage.value = { ok: false, text: errorText(e) };
   } finally {
     tgBusy.value = false;
   }
@@ -278,12 +412,12 @@ const detailOptions: Array<{ value: NotificationDetail; label: string; hint: str
   {
     value: 'full',
     label: 'מלא',
-    hint: 'שמות ספקים וסכומים',
+    hint: 'שמות בתי עסק וסכומים',
     sample: '🛒 שופרסל דיל — ₪287',
   },
   {
     value: 'amounts',
-    label: 'בלי שמות ספקים',
+    label: 'בלי שמות בתי עסק',
     hint: 'קטגוריות וסכומים בלבד',
     sample: '🛒 סופר וקניות לבית — ₪287',
   },
@@ -312,11 +446,18 @@ async function sendSummaryNow(kind: 'daily' | 'weekly' | 'monthly') {
   }
 }
 
-async function clearTelegram() {
-  if (!confirm('לנתק את הבוט? ההתראות יפסיקו להישלח.')) return;
-  await api.clearTelegram();
-  tgMessage.value = null;
-  await load();
+function clearTelegram() {
+  ask({
+    title: 'ניתוק הבוט',
+    body: 'ההודעות בטלגרם יפסיקו להישלח לכל הנמענים, והטוקן יימחק מהמחשב. אפשר לחבר מחדש בכל רגע.',
+    confirmLabel: 'ניתוק',
+    danger: true,
+    run: async () => {
+      await api.clearTelegram();
+      tgMessage.value = null;
+      await load();
+    },
+  });
 }
 
 async function saveAnchorDay(value: string) {
@@ -339,7 +480,7 @@ async function refreshJob() {
       if (status.status === 'done' || status.status === 'failed') await load();
     }
   } catch(e) {
-    error.value='לא ניתן לבדוק את התקדמות המשיכה. '+String(e);stopPolling();
+    error.value='לא ניתן לבדוק את התקדמות עדכון הנתונים. '+errorText(e);stopPolling();
   }
 }
 
@@ -362,17 +503,26 @@ onMounted(async () => {
 onBeforeUnmount(stopPolling);
 
 async function runScrape(companies: string[] = []) {
-  try{job.value = await api.startScrape(companies);startPolling()}catch(e){error.value=String(e)}
+  try{job.value = await api.startScrape(companies);startPolling()}catch(e){error.value=errorText(e)}
 }
 
 // --- credential form ---
+const formSection = ref<HTMLElement | null>(null);
+
+/** The form sits above the provider cards; bring it into view when opened from below. */
+async function showForm() {
+  formOpen.value = true;
+  await nextTick();
+  formSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 function openAdd() {
   isEditing.value = false;
   formCompany.value = '';
   formDisplayName.value = '';
   formValues.value = {};
   formError.value = null;
-  formOpen.value = true;
+  void showForm();
 }
 
 function openEdit(connection: Connection) {
@@ -381,7 +531,7 @@ function openEdit(connection: Connection) {
   formDisplayName.value = connection.displayName;
   formValues.value = {};
   formError.value = null;
-  formOpen.value = true;
+  void showForm();
 }
 
 function onProviderChange() {
@@ -393,12 +543,12 @@ function onProviderChange() {
 async function saveConnection() {
   const provider = selectedProvider.value;
   if (!provider) {
-    formError.value = 'בחרו ספק';
+    formError.value = 'בחרו בנק או חברת אשראי';
     return;
   }
   const missing = provider.loginFields.filter((f) => !formValues.value[f]?.trim());
   if (missing.length) {
-    formError.value = `חסר: ${missing.join(', ')}`;
+    formError.value = `חסר: ${missing.map(fieldLabel).join(', ')}`;
     return;
   }
 
@@ -421,34 +571,110 @@ async function saveConnection() {
   }
 }
 
-async function removeConnection(connection: Connection) {
-  if (!confirm(`להסיר את החיבור ל${connection.displayName}?\nפרטי ההתחברות וה-session/cookies של הבנק יימחקו מהמחשב. התנועות שכבר נמשכו יישארו.`)) return;
-  try{await api.removeConnection(connection.company);await load()}catch(e){error.value=String(e)}
+function removeConnection(connection: Connection) {
+  ask({
+    title: `הסרת החיבור ל${connection.displayName}`,
+    body: 'פרטי ההתחברות ופרטי הכניסה השמורים לאתר הבנק יימחקו מהמחשב, והחשבונות לא יתעדכנו יותר. התנועות שכבר נשמרו יישארו.',
+    confirmLabel: 'הסרת החיבור',
+    danger: true,
+    run: async () => {
+      await api.removeConnection(connection.company);
+      await load();
+    },
+  });
 }
 
-async function setLifecycle(id:string,lifecycle:string){try{await api.updateAccount(id,{lifecycle:lifecycle as 'active'|'dormant'|'closed'});await load()}catch(e){error.value=String(e)}}
+async function setLifecycle(id:string,lifecycle:string){try{await api.updateAccount(id,{lifecycle:lifecycle as 'active'|'dormant'|'closed'});await load()}catch(e){error.value=errorText(e)}}
 
 async function saveBillingDay(accountId: string, value: string) {
   const day = value === '' ? null : Number(value);
   if (day !== null && (!Number.isInteger(day) || day < 1 || day > 31)) return;
-  await api.updateAccount(accountId, { billingDay: day });
-  await load();
+  try {
+    await api.updateAccount(accountId, { billingDay: day });
+    await load();
+  } catch (e) {
+    error.value = errorText(e);
+  }
 }
 
-async function renameAccount(accountId: string, current: string) {
-  const name = prompt('שם החשבון:', current);
-  if (!name || name === current) return;
-  try{await api.updateAccount(accountId,{displayName:name});await load()}catch(e){error.value=String(e)}
+// --- rename, in place ---
+const renamingId = ref<string | null>(null);
+const renameDraft = ref('');
+const renameBusy = ref(false);
+
+async function startRename(account: ConnectionAccount) {
+  renamingId.value = account.id;
+  renameDraft.value = account.displayName;
+  await nextTick();
+  const input = document.getElementById('rename-' + account.id) as HTMLInputElement | null;
+  input?.focus();
+  input?.select();
 }
 
-async function deleteAccount(accountId: string, name: string, transactions: number) {
-  if (!confirm(`למחוק את "${name}"?\n${transactions} תנועות יימחקו לצמיתות.`)) return;
-  try{await api.deleteAccount(accountId);await load()}catch(e){error.value=String(e)}
+async function saveRename(account: ConnectionAccount) {
+  const name = renameDraft.value.trim();
+  if (!name || name === account.displayName) {
+    renamingId.value = null;
+    return;
+  }
+  renameBusy.value = true;
+  try {
+    await api.updateAccount(account.id, { displayName: name });
+    renamingId.value = null;
+    await load();
+  } catch (e) {
+    error.value = errorText(e);
+  } finally {
+    renameBusy.value = false;
+  }
+}
+
+/**
+ * Deleting an account is permanent and takes its history with it; closing it
+ * keeps the history and only drops it from the forecast - which is usually what
+ * someone retiring an old card actually wants. So "close" is offered first.
+ *
+ * `transactions` is undefined when the count is unknown, and the copy says
+ * "all" rather than guessing a number.
+ */
+function deleteAccount(
+  account: { id: string; displayName: string; lifecycle?: string; transactions?: number },
+  connected: boolean,
+) {
+  const n = account.transactions;
+  const lost =
+    n === undefined
+      ? 'כל התנועות של החשבון יימחקו לצמיתות.'
+      : n === 0
+        ? 'אין לחשבון תנועות שמורות.'
+        : `${txnCount(n)} של החשבון ${n === 1 ? 'תימחק' : 'יימחקו'} לצמיתות.`;
+  const recreate = connected ? ' כל עוד החיבור פעיל, העדכון הבא ייצור אותו מחדש.' : '';
+  ask({
+    title: `מחיקת "${account.displayName}"`,
+    body: `${lost} אי אפשר לבטל את המחיקה.${recreate}`,
+    confirmLabel: 'מחיקה לצמיתות',
+    danger: true,
+    run: async () => {
+      await api.deleteAccount(account.id);
+      await load();
+    },
+    alternative:
+      account.lifecycle === 'closed'
+        ? undefined
+        : {
+            hint: 'רוצים רק שהחשבון לא ייספר בתחזית? סימון כסגור שומר את כל ההיסטוריה.',
+            label: 'סימון כסגור',
+            run: async () => {
+              await api.updateAccount(account.id, { lifecycle: 'closed' });
+              await load();
+            },
+          },
+  });
 }
 
 /** Freshness of the last successful sync, in plain words. */
 function freshness(scrapedAt: string | null): { label: string; color: string } {
-  if (!scrapedAt) return { label: 'לא נמשך מעולם', color: 'var(--text-muted)' };
+  if (!scrapedAt) return { label: 'עוד לא עודכן', color: 'var(--text-muted)' };
   const days = Math.floor((Date.now() - new Date(scrapedAt).getTime()) / 86_400_000);
   if (days === 0) return { label: 'עודכן היום', color: 'var(--status-good)' };
   if (days === 1) return { label: 'עודכן אתמול', color: 'var(--status-good)' };
@@ -466,7 +692,7 @@ function freshness(scrapedAt: string | null): { label: string; color: string } {
       </div>
       <div v-if="!settingsOnly" class="flex items-center gap-2">
         <button class="btn btn-ghost" :disabled="running || !data?.connections.length" @click="runScrape()">
-          {{ running ? 'מושך…' : 'משיכה מכולם' }}
+          {{ running ? 'מעדכן…' : 'עדכון נתונים מכולם' }}
         </button>
         <button class="btn btn-primary" @click="openAdd">הוספת חיבור</button>
       </div>
@@ -479,17 +705,53 @@ function freshness(scrapedAt: string | null): { label: string; color: string } {
 
     <template v-if="!settingsOnly">
     <p v-if="loading" role="status" class="loading-line">טוען חשבונות…</p>
-    <p v-if="data?.connections.length" class="section-hint">חשבון רדום אינו מייצר אזהרות על סנכרון חסר. חשבון סגור נשאר בהיסטוריה, אך יתרתו והתחייבויותיו אינן נכללות בתחזית היתרה.</p>
-    <!-- live scrape progress -->
-    <section v-if="job" class="card p-4">
+    <p v-if="data?.connections.length" class="section-hint">חשבון רדום אינו מייצר אזהרות על עדכון חסר. חשבון סגור נשאר בהיסטוריה, אך יתרתו וחיוביו העתידיים אינם נכללים בתחזית היתרה.</p>
+    <!-- live sync progress, then one result per bank / card company -->
+    <section v-if="job" class="card p-4" aria-live="polite">
       <div class="flex items-center justify-between gap-3">
         <h2 class="section-title">
-          <span v-if="running" class="inline-block animate-pulse">●</span>
-          {{ running ? 'משיכה רצה' : job.status === 'done' ? 'המשיכה הסתיימה' : 'המשיכה נכשלה' }}
+          <span v-if="running" class="inline-block animate-pulse" aria-hidden="true">●</span>
+          {{ running ? 'עדכון הנתונים רץ' : job.status === 'done' ? 'עדכון הנתונים הסתיים' : 'עדכון הנתונים לא הושלם' }}
         </h2>
-        <button v-if="!running" class="btn btn-ghost !py-1 !text-xs" @click="job = null">סגור</button>
+        <button v-if="!running" class="btn btn-ghost !py-1 !text-xs" @click="job = null">הסתרה</button>
       </div>
-      <details class="mt-3"><summary>פרטי המשיכה</summary><pre
+
+      <ul v-if="job.results?.length" class="mt-3 space-y-2">
+        <li
+          v-for="r in job.results"
+          :key="r.company"
+          class="rounded-xl p-3"
+          :style="{ background: 'var(--surface-2)', borderInlineStart: `3px solid ${toneColor(resultView(r).tone)}` }"
+        >
+          <p class="text-sm">
+            <span class="font-semibold">{{ r.label }}</span>
+            <span :style="{ color: 'var(--text-muted)' }"> · </span>
+            <span :style="{ color: r.ok ? 'var(--text-secondary)' : toneColor(resultView(r).tone) }">{{ resultView(r).title }}</span>
+          </p>
+          <p v-if="resultView(r).body" class="mt-1 text-xs leading-5" :style="{ color: 'var(--text-secondary)' }">{{ resultView(r).body }}</p>
+          <code
+            v-if="resultView(r).command"
+            dir="ltr"
+            class="mt-1.5 inline-block select-all rounded-md px-2 py-1 text-xs"
+            :style="{ background: 'var(--surface-sunken)' }"
+          >{{ resultView(r).command }}</code>
+          <div v-if="resultView(r).action" class="mt-2">
+            <button
+              class="btn btn-ghost !py-1 !text-xs"
+              :disabled="running"
+              @click="resultAction(r, resultView(r).action!.kind)"
+            >{{ resultView(r).action!.label }}</button>
+          </div>
+        </li>
+      </ul>
+      <p v-else-if="!running && job.status === 'failed' && !job.error" class="mt-2 text-sm" :style="{ color: 'var(--text-secondary)' }">
+        חלק מהחשבונות לא עודכנו. הפירוט הטכני למטה מראה איפה זה נעצר.
+      </p>
+      <p v-if="job.error" class="mt-2 text-sm" :style="{ color: 'var(--status-critical)' }">
+        העדכון לא הושלם: {{ job.error }}
+      </p>
+
+      <details class="mt-3 text-xs"><summary class="cursor-pointer" :style="{ color: 'var(--text-muted)' }">פירוט טכני</summary><pre
         class="mt-2 max-h-48 overflow-y-auto rounded-lg p-3 text-xs leading-relaxed"
         :style="{ background: 'var(--surface-sunken)', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }"
         dir="rtl"
@@ -497,17 +759,17 @@ function freshness(scrapedAt: string | null): { label: string; color: string } {
     </section>
 
     <!-- credential form -->
-    <section v-if="formOpen" class="card p-5">
+    <section v-if="formOpen" id="credential-form" ref="formSection" class="card p-5">
       <h2 class="section-title">{{ isEditing ? 'עדכון פרטי התחברות' : 'חיבור חדש' }}</h2>
       <p class="section-hint mt-1">
-        הפרטים מוצפנים ב-DPAPI בשרת לפני שנשמרים, ולעולם לא נשלחים חזרה לדפדפן.
+        הפרטים מוצפנים בחשבון Windows שלכם לפני שנשמרים, ולעולם לא נשלחים חזרה לדפדפן.
       </p>
 
       <div class="mt-4 grid gap-3 sm:grid-cols-2">
         <label class="text-sm">
-          <span class="mb-1 block" :style="{ color: 'var(--text-muted)' }">ספק</span>
+          <span class="mb-1 block" :style="{ color: 'var(--text-muted)' }">בנק או חברת אשראי</span>
           <select v-model="formCompany" class="field w-full" :disabled="isEditing" @change="onProviderChange">
-            <option value="">בחרו ספק…</option>
+            <option value="">בחרו בנק או חברת אשראי…</option>
             <optgroup label="בנקים">
               <option v-for="p in data?.providers.filter((x) => x.type === 'bank')" :key="p.id" :value="p.id">
                 {{ p.name }}
@@ -573,7 +835,6 @@ function freshness(scrapedAt: string | null): { label: string; color: string } {
               <h3 class="font-semibold">
                 <span class="me-1" aria-hidden="true">{{ c.type === 'bank' ? '🏦' : '💳' }}</span>
                 {{ c.displayName }}
-                <span class="text-sm font-normal" :style="{ color: 'var(--text-muted)' }">({{ c.company }})</span>
               </h3>
               <div class="mt-1.5 flex flex-wrap items-center gap-2 text-xs">
                 <span
@@ -587,21 +848,21 @@ function freshness(scrapedAt: string | null): { label: string; color: string } {
                   {{ c.allEncrypted ? '🔒 סיסמאות מוצפנות' : '⚠️ סיסמאות בטקסט גלוי' }}
                 </span>
                 <span class="chip" :style="{ background: 'var(--surface-2)', color: 'var(--text-muted)' }">
-                  {{ c.hasBrowserProfile ? '🖥️ פרופיל דפדפן שמור' : 'אין פרופיל — ייתכן אתגור OTP' }}
+                  {{ c.hasBrowserProfile ? '🖥️ פרופיל דפדפן שמור' : 'ייתכן שיידרש קוד SMS בכניסה הבאה' }}
                 </span>
               </div>
             </div>
 
-            <div class="flex shrink-0 items-center gap-1.5">
-              <button class="btn btn-ghost" :disabled="running" @click="runScrape([c.company])">משיכה</button>
-              <button class="btn btn-ghost" @click="openEdit(c)">עדכון סיסמה</button>
+            <div class="flex shrink-0 flex-wrap items-center gap-1.5">
+              <button class="btn btn-ghost" :disabled="running" @click="runScrape([c.company])">עדכון נתונים</button>
+              <button class="btn btn-ghost" @click="openEdit(c)">עדכון פרטים</button>
               <button class="btn btn-danger-ghost" @click="removeConnection(c)">הסרה</button>
             </div>
           </div>
 
-          <!-- accounts produced by this provider -->
+          <!-- accounts produced by this connection; stacks as cards on a phone -->
           <div v-if="c.accounts.length" class="mt-4 overflow-x-auto">
-            <table class="w-full text-sm">
+            <table class="accounts-table w-full text-sm">
               <thead>
                 <tr class="border-b text-right" :style="{ borderColor: 'var(--gridline)', color: 'var(--text-muted)' }">
                   <th scope="col" class="px-2 py-2 font-medium">חשבון</th>
@@ -611,34 +872,64 @@ function freshness(scrapedAt: string | null): { label: string; color: string } {
                   <th scope="col" class="px-2 py-2 font-medium">ממתין לחיוב</th>
                   <th scope="col" class="px-2 py-2 font-medium">מצב חשבון</th>
                   <th scope="col" class="px-2 py-2 font-medium">עדכון</th>
-                  <th scope="col" class="px-2 py-2"></th>
+                  <th scope="col" class="px-2 py-2"><span class="sr-only">פעולות</span></th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-for="a in c.accounts" :key="a.id" class="border-b last:border-0" :style="{ borderColor: 'var(--gridline)' }">
-                  <td class="px-2 py-2">
-                    <button class="text-start hover:underline" @click="renameAccount(a.id, a.displayName)">
-                      {{ a.displayName }}
-                    </button>
+                  <td class="account-cell px-2 py-2">
+                    <form v-if="renamingId === a.id" class="flex flex-wrap items-center gap-1.5" @submit.prevent="saveRename(a)">
+                      <input
+                        v-model="renameDraft"
+                        class="field !py-1 text-sm"
+                        maxlength="60"
+                        :id="'rename-'+a.id"
+                        :aria-label="'שם חדש ל'+a.displayName"
+                        @keyup.esc="renamingId = null"
+                      />
+                      <button type="submit" class="btn btn-primary !px-3 !py-1 !text-xs" :disabled="renameBusy || !renameDraft.trim()">שמירה</button>
+                      <button type="button" class="btn btn-ghost !px-3 !py-1 !text-xs" :disabled="renameBusy" @click="renamingId = null">ביטול</button>
+                    </form>
+                    <span v-else class="inline-flex items-center gap-1">
+                      <span class="font-medium">{{ a.displayName }}</span>
+                      <button
+                        class="icon-btn !h-7 !w-7"
+                        :aria-label="'שינוי השם של '+a.displayName"
+                        title="שינוי שם"
+                        @click="startRename(a)"
+                      ><AppIcon name="pencil" :size="14" /></button>
+                    </span>
                     <span class="block text-xs" :style="{ color: 'var(--text-muted)' }">•••• {{ a.lastFour }}</span>
+                    <!-- The day the card is charged at the bank; empty = learned from history. -->
+                    <label v-if="c.type === 'credit_card' || a.type === 'credit_card'" class="mt-1 flex items-center gap-1.5 text-xs" :style="{ color: 'var(--text-muted)' }">
+                      יום חיוב
+                      <select
+                        class="field !min-h-0 !py-0.5 text-xs"
+                        :value="a.billingDay ?? ''"
+                        @change="saveBillingDay(a.id, ($event.target as HTMLSelectElement).value)"
+                      >
+                        <option value="">אוטומטי</option>
+                        <option v-for="d in 31" :key="d" :value="d">{{ d }} בחודש</option>
+                      </select>
+                    </label>
                   </td>
-                  <td class="tnum px-2 py-2">{{ a.transactions }}</td>
-                  <td class="px-2 py-2 text-xs" :style="{ color: 'var(--text-muted)' }">
-                    <template v-if="a.firstTransaction">{{ a.firstTransaction }} → {{ a.lastTransaction }}</template>
+                  <td class="tnum px-2 py-2" data-label="תנועות">{{ a.transactions.toLocaleString('he-IL') }}</td>
+                  <td class="px-2 py-2 text-xs" data-label="טווח" :style="{ color: 'var(--text-muted)' }">
+                    <template v-if="a.firstTransaction">{{ fmtDate(a.firstTransaction) }} עד {{ fmtDate(a.lastTransaction ?? a.firstTransaction) }}</template>
                     <template v-else>—</template>
                   </td>
-                  <td class="tnum px-2 py-2">{{ a.balance != null ? fmtILSRound(a.balance) : '—' }}<span class="block text-xs">{{a.balanceAt?new Date(a.balanceAt).toLocaleDateString('he-IL'):'ללא מועד יתרה'}}</span></td>
-                  <td class="tnum px-2 py-2">{{ a.float > 0 ? fmtILSRound(a.float) : '—' }}</td>
-                  <td class="px-2 py-2">
+                  <td class="tnum px-2 py-2" data-label="יתרה"><span>{{ a.balance != null ? fmtILSRound(a.balance) : '—' }}<span class="block text-xs">{{a.balanceAt?fmtDate(a.balanceAt):'ללא מועד יתרה'}}</span></span></td>
+                  <td class="tnum px-2 py-2" data-label="ממתין לחיוב">{{ a.float > 0 ? fmtILSRound(a.float) : '—' }}</td>
+                  <td class="px-2 py-2" data-label="מצב חשבון">
                     <select class="field !py-1 text-xs" :value="a.lifecycle" :aria-label="'מצב '+a.displayName" @change="setLifecycle(a.id,($event.target as HTMLSelectElement).value)"><option value="active">פעיל</option><option value="dormant">רדום</option><option value="closed">סגור</option></select>
                   </td>
-                  <td class="px-2 py-2 text-xs" :style="{ color: freshness(a.scrapedAt).color }">
+                  <td class="px-2 py-2 text-xs" data-label="עדכון" :style="{ color: freshness(a.scrapedAt).color }">
                     {{ freshness(a.scrapedAt).label }}
                   </td>
-                  <td class="px-2 py-2 text-left">
+                  <td class="actions-cell px-2 py-2 text-left">
                     <button
                       class="btn btn-danger-ghost !px-2 !text-xs"
-                      @click="deleteAccount(a.id, a.displayName, a.transactions)"
+                      @click="deleteAccount(a, true)"
                     >
                       מחיקה
                     </button>
@@ -649,7 +940,7 @@ function freshness(scrapedAt: string | null): { label: string; color: string } {
           </div>
 
           <p v-else class="mt-3 text-sm" :style="{ color: 'var(--text-muted)' }">
-            עוד לא נמשכו נתונים מהחיבור הזה. לחצו "משיכה".
+            עוד לא עודכנו נתונים מהחיבור הזה. לחצו "עדכון נתונים".
           </p>
         </article>
       </section>
@@ -704,7 +995,7 @@ function freshness(scrapedAt: string | null): { label: string; color: string } {
         </span>
       </div>
       <p class="section-hint mt-1">
-        סיכום יומי של ההוצאות, התראות תקציב, והודעה כשמשיכה נכשלת או שחסר חיבור.
+        כל בוקר: אתמול מול התקציב היומי ומה נשאר להוציא במחזור — בשקט בימים רגילים, ועם צליל כשיש משהו לטפל בו. ביום ראשון סיכום שבועי מלא, וב-1 לחודש סיכום חודשי.
       </p>
 
       <template v-if="settings.telegramConfigured">
@@ -752,7 +1043,7 @@ function freshness(scrapedAt: string | null): { label: string; color: string } {
               placeholder="מזהה צ׳אט של נמען נוסף"
             />
             <button class="btn btn-ghost shrink-0" :disabled="tgDetecting" @click="detectChat">
-              {{ tgDetecting ? 'מחפש…' : 'מי כתב לבוט' }}
+              {{ tgDetecting ? 'מחפש…' : 'איתור הצ׳אט שלי' }}
             </button>
             <button class="btn btn-primary shrink-0" :disabled="tgBusy || !tgNewRecipient.trim()" @click="addRecipient">
               הוספה
@@ -773,8 +1064,8 @@ function freshness(scrapedAt: string | null): { label: string; color: string } {
             {{ tgDetectHint }}
           </p>
           <p class="mt-2 text-xs" :style="{ color: 'var(--text-muted)' }">
-            כדי להוסיף מישהו: שהוא יפתח את הבוט בטלגרם וישלח <span class="font-mono">/start</span>,
-            ואז “מי כתב לבוט”. ההוספה נבדקת בשליחה אמיתית — אם היא לא מגיעה, הנמען לא נשמר.
+            כדי להוסיף מישהו: הנמען פותח את הבוט בטלגרם ושולח <span class="font-mono">/start</span>,
+            ואז לוחצים “איתור הצ׳אט שלי”. ההוספה נבדקת בשליחה אמיתית — אם ההודעה לא מגיעה, הנמען לא נשמר.
           </p>
         </div>
 
@@ -783,7 +1074,7 @@ function freshness(scrapedAt: string | null): { label: string; color: string } {
           <h3 class="text-sm font-semibold">כמה מידע יוצא בהודעה</h3>
           <p class="mt-1 text-xs" :style="{ color: 'var(--text-muted)' }">
             צ׳אטים רגילים בטלגרם <b>אינם</b> מוצפנים מקצה לקצה — ההודעות יושבות על שרתי טלגרם.
-            זו הבחירה כמה מהחיים שלך נמצא שם.
+            כאן בוחרים כמה מהחיים שלכם יישב שם.
           </p>
           <div class="mt-2.5 space-y-1.5">
             <label
@@ -817,10 +1108,6 @@ function freshness(scrapedAt: string | null): { label: string; color: string } {
           <button class="btn btn-ghost" :disabled="tgBusy" @click="sendSummaryNow('monthly')">חודשי</button>
           <button class="btn btn-danger-ghost" :disabled="tgBusy" @click="clearTelegram">ניתוק</button>
         </div>
-
-        <p class="mt-2 text-xs" :style="{ color: 'var(--text-muted)' }">
-          אוטומטית: חודשי ב-1 בחודש, שבועי בימי ראשון, יומי בשאר הימים.
-        </p>
       </template>
 
       <template v-else>
@@ -832,7 +1119,7 @@ function freshness(scrapedAt: string | null): { label: string; color: string } {
           </li>
           <li>2. הדביקו את הטוקן כאן למטה.</li>
           <li>3. פתחו את הבוט החדש שלכם בטלגרם ושלחו לו <span class="font-mono">/start</span>.</li>
-          <li>4. לחצו “זהה אותי” — המספר יתמלא לבד.</li>
+          <li>4. לחצו “איתור הצ׳אט שלי” — המספר יתמלא לבד.</li>
         </ol>
 
         <div class="mt-3 grid gap-3 sm:grid-cols-2">
@@ -855,7 +1142,7 @@ function freshness(scrapedAt: string | null): { label: string; color: string } {
             <div class="flex gap-2">
               <input v-model="tgChatId" class="field w-full" autocomplete="off" spellcheck="false" placeholder="ייתמלא אוטומטית" />
               <button class="btn btn-ghost shrink-0" :disabled="tgDetecting || !tgToken.trim()" @click="detectChat">
-                {{ tgDetecting ? 'מחפש…' : 'זהה אותי' }}
+                {{ tgDetecting ? 'מחפש…' : 'איתור הצ׳אט שלי' }}
               </button>
             </div>
           </label>
@@ -890,8 +1177,8 @@ function freshness(scrapedAt: string | null): { label: string; color: string } {
       </p>
 
       <p class="mt-3 border-t pt-3 text-xs" :style="{ borderColor: 'var(--gridline)', color: 'var(--text-muted)' }">
-        הטוקן מוצפן ב-DPAPI כמו שאר הסיסמאות ולא נשלח חזרה לדפדפן. ההודעות עוברות דרך שרתי טלגרם —
-        הסיכומים חושפים דפוסי הוצאות, וזה tradeoff מודע.
+        הטוקן מוצפן בחשבון Windows שלכם כמו שאר הסיסמאות ולא נשלח חזרה לדפדפן. ההודעות עוברות דרך שרתי טלגרם —
+        הסיכומים חושפים דפוסי הוצאות, וזו פשרה מודעת.
       </p>
     </section>
 
@@ -911,7 +1198,7 @@ function freshness(scrapedAt: string | null): { label: string; color: string } {
           <button class="btn btn-primary" :disabled="backupBusy || !backupDestination" @click="prepareBackup">הגדרת גיבוי</button>
         </div>
         <div v-if="backupSetup" class="mt-3 rounded-xl border p-4" :style="{ borderColor: 'var(--status-warning)' }">
-          <p class="text-sm font-semibold">שמור עכשיו את משפט השחזור במנהל סיסמאות:</p>
+          <p class="text-sm font-semibold">שמרו עכשיו את משפט השחזור במנהל סיסמאות:</p>
           <code class="mt-2 block select-all rounded-lg p-3 text-sm" dir="ltr" :style="{ background: 'var(--surface-sunken)' }">{{ backupSetup.passphrase }}</code>
           <p class="mt-2 text-xs" :style="{ color: 'var(--text-muted)' }">
             הוא מוצג פעם אחת. בלעדיו אי אפשר לפתוח גיבוי אחרי אובדן המחשב.
@@ -932,18 +1219,98 @@ function freshness(scrapedAt: string | null): { label: string; color: string } {
     <section v-if="!settingsOnly && data?.orphanAccounts.length" class="card p-5">
       <h2 class="section-title">חשבונות בלי חיבור פעיל</h2>
       <p class="section-hint mt-1">
-        הנתונים שלהם נשארו במערכת, אבל אין להם ספק מוגדר — הם לא יתעדכנו יותר.
+        הנתונים שלהם נשארו במערכת, אבל אין להם חיבור לבנק או לחברת אשראי — הם לא יתעדכנו יותר.
       </p>
       <ul class="mt-3 space-y-2">
         <li
           v-for="a in data.orphanAccounts"
           :key="a.id"
-          class="flex items-center justify-between gap-3 text-sm"
+          class="flex flex-wrap items-center justify-between gap-3 text-sm"
         >
-          <span>{{ a.displayName }} <span :style="{ color: 'var(--text-muted)' }">({{ a.institution }} •••• {{ a.lastFour }})</span></span>
-          <button class="btn btn-danger-ghost" @click="deleteAccount(a.id, a.displayName, 0)">מחיקה</button>
+          <span>
+            {{ a.displayName }}
+            <span :style="{ color: 'var(--text-muted)' }">•••• {{ a.lastFour }}<template v-if="a.transactions !== undefined"> · {{ txnCount(a.transactions) }}</template><template v-if="a.lifecycle === 'closed'"> · סגור</template></span>
+          </span>
+          <button class="btn btn-danger-ghost" @click="deleteAccount(a, false)">מחיקה</button>
         </li>
       </ul>
     </section>
+
+    <AppDialog
+      :open="!!confirmation"
+      :title="confirmation?.title ?? ''"
+      :confirm-label="confirmation?.confirmLabel"
+      :danger="confirmation?.danger"
+      :busy="confirmBusy"
+      @close="!confirmBusy && (confirmation = null)"
+      @confirm="confirmation && runConfirmed(confirmation.run)"
+    >
+      <div v-if="confirmation" class="space-y-3 text-sm leading-6">
+        <p>{{ confirmation.body }}</p>
+        <div v-if="confirmation.alternative" class="rounded-xl p-3" :style="{ background: 'var(--surface-2)' }">
+          <p class="text-xs" :style="{ color: 'var(--text-secondary)' }">{{ confirmation.alternative.hint }}</p>
+          <button
+            class="btn btn-primary mt-2"
+            :disabled="confirmBusy"
+            @click="runConfirmed(confirmation.alternative.run)"
+          >{{ confirmation.alternative.label }}</button>
+        </div>
+        <p v-if="confirmError" role="alert" :style="{ color: 'var(--status-critical)' }">{{ confirmError }}</p>
+      </div>
+    </AppDialog>
   </div>
 </template>
+
+<style scoped>
+/*
+ * Eight columns do not fit a phone. Below 700px each account becomes a small
+ * card: the name on top, then one labelled line per figure.
+ */
+@media (max-width: 700px) {
+  .accounts-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .accounts-table,
+  .accounts-table tbody,
+  .accounts-table tr,
+  .accounts-table td {
+    display: block;
+    width: 100%;
+  }
+  .accounts-table tr {
+    border: 1px solid var(--gridline);
+    border-radius: 14px;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+  }
+  .accounts-table tr:last-child {
+    border-bottom-width: 1px;
+  }
+  .accounts-table td {
+    padding: 4px 0;
+  }
+  .accounts-table td[data-label] {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .accounts-table td[data-label]::before {
+    content: attr(data-label);
+    color: var(--text-muted);
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+  .accounts-table td.account-cell {
+    padding-bottom: 8px;
+  }
+  .accounts-table td.actions-cell {
+    text-align: start;
+  }
+}
+</style>

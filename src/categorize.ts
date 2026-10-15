@@ -1,6 +1,6 @@
 import { prisma } from './db.js';
 import { compileSafeRegex } from './safe-regex.js';
-import { withChange } from './changes.js';
+import { withChange, ChangeConflict } from './changes.js';
 
 export interface CategorizeStats {
   scanned: number;
@@ -97,6 +97,55 @@ export async function applyCategoryRules(opts?: { recategorize?: boolean; previe
       if (!current || current.categoryLocked || current.categoryId !== t.categoryId) continue;
       const rule = rules.find(r => ruleMatches(r, current.description));
       if (!rule) continue;
+      await change('transaction', t.id, { categoryId: rule.categoryId, classificationSource: 'rule', classificationRuleId: rule.id, categorizedAt: new Date() });
+      applied++;
+    }
+    return { scanned: txns.length, categorized: applied };
+  });
+}
+
+interface RankedRule extends RuleForMatch {
+  createdAt: Date;
+}
+
+/** Engine order: higher priority first, then the older rule. */
+function outranks(other: RankedRule, rule: RankedRule): boolean {
+  return other.priority > rule.priority || (other.priority === rule.priority && other.createdAt < rule.createdAt);
+}
+
+/**
+ * The existing rows one rule would take on its own: unlocked, still without a
+ * category, matching it, and not also claimed by a stronger rule pointing to a
+ * different category - the full engine would hand those to the stronger rule,
+ * so taking them here would classify them differently than a re-run would.
+ */
+export function claimableBy<T extends { description: string; categoryId: string | null; categoryLocked: boolean }>(rule: RankedRule, rules: RankedRule[], txns: T[]): T[] {
+  const stronger = rules.filter(r => r.id !== rule.id && r.categoryId !== rule.categoryId && outranks(r, rule));
+  return txns.filter(t => !t.categoryLocked && t.categoryId === null && ruleMatches(rule, t.description) && !stronger.some(r => ruleMatches(r, t.description)));
+}
+
+/**
+ * Apply one rule, and only that rule, to the uncategorised history.
+ *
+ * Creating a rule and then running every rule would let other rules fill rows
+ * too, so the count shown afterwards could not be attributed to the new rule.
+ * This never overrides a choice already made, and the returned count is
+ * exactly what this rule did.
+ */
+export async function applySingleRule(ruleId: string, opts?: { preview?: boolean }): Promise<CategorizeStats & { samples?: unknown[] }> {
+  const rule = await prisma.categoryRule.findUnique({ where: { id: ruleId } });
+  if (!rule) throw new ChangeConflict('החוק כבר אינו קיים. רעננו ונסו שוב.');
+  const [rules, txns] = await Promise.all([
+    prisma.categoryRule.findMany(),
+    prisma.transaction.findMany({ where: { categoryLocked: false, categoryId: null }, select: { id: true, description: true, amount: true, categoryId: true, categoryLocked: true } }),
+  ]);
+  const claimed = claimableBy(rule, rules, txns);
+  if (opts?.preview) return { scanned: txns.length, categorized: claimed.length, samples: claimed.slice(0, 12) };
+  return withChange('החלת חוק סיווג', async (db, change) => {
+    let applied = 0;
+    for (const t of claimed) {
+      const current = await db.transaction.findUnique({ where: { id: t.id } });
+      if (!current || current.categoryLocked || current.categoryId !== null) continue;
       await change('transaction', t.id, { categoryId: rule.categoryId, classificationSource: 'rule', classificationRuleId: rule.id, categorizedAt: new Date() });
       applied++;
     }

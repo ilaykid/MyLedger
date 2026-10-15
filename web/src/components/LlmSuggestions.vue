@@ -35,10 +35,10 @@ async function suggest() {
     // Pre-tick everything; unticking a wrong guess is faster than ticking 30.
     chosen.value = new Set(result.suggestions.map((s) => s.merchant));
     if (!result.suggestions.length) {
-      message.value = { ok: true, text: 'המודל לא הצליח לסווג אף ספק בביטחון.' };
+      message.value = { ok: true, text: 'המודל לא הצליח לסווג אף בית עסק בביטחון.' };
     }
   } catch (e) {
-    message.value = { ok: false, text: e instanceof Error ? e.message : String(e) };
+    message.value = { ok: false, text: e instanceof Error ? e.message : 'הפעולה לא הושלמה. נסו שוב.' };
   } finally {
     busy.value = false;
   }
@@ -55,12 +55,12 @@ async function apply() {
     const result = await api.llmAccept(accepted);
     message.value = {
       ok: true,
-      text: `נוצרו ${result.created} חוקים · ${result.categorized} תנועות קוטלגו`,
+      text: `${result.created === 1 ? 'נוצר חוק אחד' : `נוצרו ${result.created} חוקים`} · ${result.categorized === 1 ? 'תנועה אחת סווגה' : `${result.categorized} תנועות סווגו`}`,
     };
     suggestions.value = [];
     emit('applied');
   } catch (e) {
-    message.value = { ok: false, text: e instanceof Error ? e.message : String(e) };
+    message.value = { ok: false, text: e instanceof Error ? e.message : 'הפעולה לא הושלמה. נסו שוב.' };
   } finally {
     busy.value = false;
   }
@@ -78,7 +78,7 @@ const chosenCount = computed(() => suggestions.value.filter((s) => chosen.value.
 <template>
   <section class="card p-5">
     <div class="flex flex-wrap items-baseline justify-between gap-2">
-      <h2 class="section-title">קטלוג בעזרת מודל מקומי</h2>
+      <h2 class="section-title">הצעות סיווג ממודל מקומי</h2>
       <span
         class="chip"
         :style="{
@@ -101,9 +101,9 @@ const chosenCount = computed(() => suggestions.value.filter((s) => chosen.value.
       class="mt-2 rounded-lg p-2.5 text-xs"
       :style="{ background: 'color-mix(in srgb, var(--status-warning) 12%, transparent)', color: 'var(--text-secondary)' }"
     >
-      <b>⚠️ בדוק כל הצעה.</b> במדידה על 54 ספקים עם תשובה ידועה המודל קלע ל-43%.
-      זה טוב להצעות על זנב ארוך שאחרת ממיינים ביד — ולא מספיק לסיווג אוטומטי.
-      לכן שום דבר לא מוחל בלי סימון שלך. ההרצה אורכת כמה דקות.
+      <b>⚠️ בדקו כל הצעה.</b> במדידה על 54 בתי עסק עם תשובה ידועה המודל קלע ל-43%.
+      זה חוסך מיון ידני של הרבה בתי עסק קטנים שמופיעים לעיתים רחוקות — אבל לא מספיק לסיווג אוטומטי.
+      לכן שום דבר לא מוחל בלי סימון שלכם. ההרצה אורכת כמה דקות.
     </p>
 
     <p v-if="!status?.available" class="mt-3 text-sm" :style="{ color: 'var(--text-muted)' }">
@@ -114,7 +114,7 @@ const chosenCount = computed(() => suggestions.value.filter((s) => chosen.value.
 
     <template v-else>
       <button v-if="!suggestions.length" class="btn btn-primary mt-3" :disabled="busy" @click="suggest">
-        {{ busy ? 'המודל חושב…' : 'הצע סיווגים לספקים לא מוכרים' }}
+        {{ busy ? 'המודל חושב…' : 'הצעות סיווג לבתי עסק לא מוכרים' }}
       </button>
 
       <template v-else>
@@ -124,9 +124,9 @@ const chosenCount = computed(() => suggestions.value.filter((s) => chosen.value.
           </span>
           <span class="flex gap-1.5">
             <button class="btn btn-ghost !py-1 !text-xs" @click="chosen = new Set(suggestions.map((s) => s.merchant))">
-              בחר הכל
+              בחירת הכול
             </button>
-            <button class="btn btn-ghost !py-1 !text-xs" @click="chosen = new Set()">נקה</button>
+            <button class="btn btn-ghost !py-1 !text-xs" @click="chosen = new Set()">ניקוי הבחירה</button>
           </span>
         </div>
 
@@ -135,7 +135,7 @@ const chosenCount = computed(() => suggestions.value.filter((s) => chosen.value.
             <thead class="sticky top-0" :style="{ background: 'var(--surface-2)' }">
               <tr class="text-right" :style="{ color: 'var(--text-muted)' }">
                 <th scope="col" class="px-3 py-2"></th>
-                <th scope="col" class="px-3 py-2 font-medium">ספק</th>
+                <th scope="col" class="px-3 py-2 font-medium">בית עסק</th>
                 <th scope="col" class="px-3 py-2 font-medium">קטגוריה מוצעת</th>
                 <th scope="col" class="px-3 py-2 font-medium">חוק שייווצר</th>
                 <th scope="col" class="px-3 py-2 font-medium">סכום</th>
@@ -152,13 +152,13 @@ const chosenCount = computed(() => suggestions.value.filter((s) => chosen.value.
                   <input
                     type="checkbox"
                     :checked="chosen.has(s.merchant)"
-                    :aria-label="`אשר סיווג ל${s.merchant}`"
+                    :aria-label="`אישור סיווג ל${s.merchant}`"
                     @change="toggle(s.merchant)"
                   />
                 </td>
                 <td class="px-3 py-2">
                   {{ s.merchant }}
-                  <span class="block text-xs" :style="{ color: 'var(--text-muted)' }">{{ s.count }} תנועות</span>
+                  <span class="block text-xs" :style="{ color: 'var(--text-muted)' }">{{ s.count === 1 ? 'תנועה אחת' : `${s.count} תנועות` }}</span>
                 </td>
                 <td class="px-3 py-2 font-semibold">{{ s.category }}</td>
                 <td class="px-3 py-2">
@@ -172,13 +172,13 @@ const chosenCount = computed(() => suggestions.value.filter((s) => chosen.value.
 
         <div class="mt-3 flex items-center gap-2">
           <button class="btn btn-primary" :disabled="busy || chosenCount === 0" @click="apply">
-            {{ busy ? 'מחיל…' : `צור ${chosenCount} חוקים` }}
+            {{ busy ? 'מחיל…' : chosenCount === 1 ? 'יצירת חוק אחד' : `יצירת ${chosenCount} חוקים` }}
           </button>
           <button class="btn btn-ghost" :disabled="busy" @click="suggestions = []">ביטול</button>
         </div>
 
         <p v-if="skipped.length" class="mt-2 text-xs" :style="{ color: 'var(--text-muted)' }">
-          {{ skipped.length }} ספקים נותרו בלי הצעה — המודל לא היה בטוח.
+          {{ skipped.length === 1 ? 'בית עסק אחד נותר' : `${skipped.length} בתי עסק נותרו` }} בלי הצעה — המודל לא היה בטוח.
         </p>
       </template>
     </template>

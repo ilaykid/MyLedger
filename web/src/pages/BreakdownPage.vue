@@ -73,13 +73,13 @@ const verdict = computed(() => {
   if(health.value?.reliability.status!=='complete')return {label:running.value?'הערכה · נתונים חלקיים':'סיכום הנתונים שנקלטו',tone:'var(--text-muted)'};
   if (!running.value) {
     return positive.value
-      ? { label: 'חיובי', tone: 'var(--status-good)' }
-      : { label: 'שלילי', tone: 'var(--status-critical)' };
+      ? { label: 'עודף', tone: 'var(--status-good)' }
+      : { label: 'גירעון', tone: 'var(--status-critical)' };
   }
   if (Math.abs(verdictNet.value) < 50_000) return { label: 'מאוזן', tone: 'var(--status-good)' };
   return positive.value
-    ? { label: 'צפוי חיובי', tone: 'var(--status-good)' }
-    : { label: 'צפוי שלילי', tone: 'var(--status-warning)' };
+    ? { label: 'עודף צפוי', tone: 'var(--status-good)' }
+    : { label: 'גירעון צפוי', tone: 'var(--status-warning)' };
 });
 
 /**
@@ -152,16 +152,20 @@ const budgetPct = computed(() => {
 <template>
   <div class="space-y-4">
     <div class="page-heading">
-      <div><h1>לאן הכסף הולך</h1><p>הכנסות והוצאות לפי קטגוריה · חודשים קלנדריים</p></div>
-      <!-- filters in one row above the content -->
-      <select v-model="month" class="field" aria-label="חודש לניתוח">
-        <option v-for="m in months" :key="m" :value="m">{{ fmtMonth(m) }}</option>
-      </select>
+      <div><h1>לאן הכסף הולך</h1><p>הכנסות והוצאות לפי קטגוריה.</p></div>
+      <!-- filters in one row above the content; this page alone counts calendar months, so it says so here -->
+      <label class="period-picker">
+        <span class="sr-only">חודש לניתוח</span>
+        <select v-model="month" class="field" aria-describedby="breakdown-period-hint">
+          <option v-for="m in months" :key="m" :value="m">{{ fmtMonth(m) }}</option>
+        </select>
+        <small id="breakdown-period-hint">לפי חודש קלנדרי (1 עד סוף החודש)</small>
+      </label>
     </div>
 
     <DataHealth :health="health" :error="error??undefined" :loading="loading" compact/>
     <div v-if="error" class="error-banner" role="alert">{{ error }} <button class="text-link" @click="load">ניסיון חוזר</button></div>
-    <p v-if="loading" class="loading-line" role="status">טוען את הניתוח…</p>
+    <p v-if="loading" class="loading-line" role="status">טוען את הנתונים…</p>
 
     <p v-if="empty" class="card p-6 text-center text-sm" :style="{ color: 'var(--text-muted)' }">
       <span aria-hidden="true">📭</span> אין תנועות בחודש הזה.
@@ -181,7 +185,7 @@ const budgetPct = computed(() => {
       <div class="analysis-summary" :class="{ 'opacity-50': loading }">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <p class="text-sm font-semibold" :style="{ color: 'var(--text-secondary)' }">
-            {{ running ? 'צפי לסוף החודש' : 'נטו החודש' }}
+            {{ running ? (positive ? 'עודף צפוי לסוף החודש' : 'גירעון צפוי לסוף החודש') : 'מאזן החודש' }}
           </p>
           <span
             class="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-semibold"
@@ -203,7 +207,7 @@ const budgetPct = computed(() => {
           יום {{ data.projection.daysElapsed }} מתוך {{ data.projection.daysTotal }}
         </p>
         <p v-else class="mt-1.5 text-sm" :style="{ color: 'var(--text-secondary)' }">
-          החודש נסגר. הכנסות פחות הוצאות תזרימיות, בלי הפקדות לחיסכון.
+          החודש נסגר. הכנסות פחות הוצאות שנספרות בתזרים, בלי הפקדות לחיסכון.
         </p>
 
         <!--
@@ -264,7 +268,7 @@ const budgetPct = computed(() => {
         <span class="font-semibold">{{ unknown.pct }}%</span>
         מהתנועות החודש ({{ fmtILSRound(unknown.amount) }}) עוד לא מסווגות, ולכן החלוקה לנושאים חלקית.
         <RouterLink :to="`/transactions?month=${month}&category=none`" class="font-semibold underline">
-          לסווג אותן →
+          לסווג אותן ←
         </RouterLink>
       </p>
 
@@ -319,7 +323,7 @@ const budgetPct = computed(() => {
             ></div>
           </div>
           <p class="mt-1 text-xs" :style="{ color: 'var(--text-muted)' }">
-            {{ Math.round(data.savings.rateOfIncome * 100) }}% מההכנסות · הרוחב המלא הוא 20%
+            {{ Math.round(data.savings.rateOfIncome * 100) }}% מההכנסות
           </p>
         </template>
 
@@ -351,7 +355,7 @@ const budgetPct = computed(() => {
           </li>
         </ul>
         <p class="mt-2 text-xs" :style="{ color: 'var(--text-muted)' }">
-          הסכום הזה לא נכלל ב"יצא" ולא בנטו — הוא עבר חשבון, לא נעלם.
+          הסכום הזה לא נכלל ב"יצא" ולא במאזן — הוא עבר חשבון, לא נעלם.
         </p>
       </div></details>
 
@@ -391,7 +395,7 @@ const budgetPct = computed(() => {
       <!-- Shown separately on purpose: real money, deliberately outside the verdict. -->
       <details v-if="data.excluded.lines.length > 0" class="fold"><summary>תנועות שלא נספרות במאזן החודשי</summary>
       <BreakdownSection
-        title="לא תזרימי"
+        title="לא נספר בתזרים"
         direction="out"
         :lines="data.excluded.lines"
         :total="data.excluded.in + data.excluded.out"
@@ -402,10 +406,10 @@ const budgetPct = computed(() => {
         :month="month"
       />
       <p v-if="data.excluded.lines.length > 0" class="text-xs" :style="{ color: 'var(--text-muted)' }">
-        הסכומים האלה שינו את היתרה בבנק אבל לא נספרים בנטו למעלה — הם לא מלמדים על החודש הבא.
+        הסכומים האלה שינו את היתרה בבנק אבל לא נספרים במאזן למעלה — הם לא מלמדים על החודש הבא.
       </p></details>
     </template>
   </div>
 </template>
 
-<style scoped>.analysis-summary{padding:20px 0 24px;border-bottom:1px solid var(--border)}.analysis-summary>.hero-figure{color:var(--text-primary)!important;font-weight:550}.analysis-summary>p{max-width:720px}</style>
+<style scoped>.period-picker{display:flex;flex-direction:column;gap:4px}.period-picker small{font-size:12px;color:var(--text-muted)}.analysis-summary{padding:20px 0 24px;border-bottom:1px solid var(--border)}.analysis-summary>.hero-figure{color:var(--text-primary)!important;font-weight:550}.analysis-summary>p{max-width:720px}</style>

@@ -209,10 +209,10 @@ function txnLink(l: BreakdownLine) {
             <span class="tnum shrink-0">{{ fmtILSRound(item.amount) }}</span>
           </div>
           <p v-if="l.moreItems > 0" class="text-xs" :style="{ color: 'var(--text-muted)' }">
-            ועוד {{ l.moreItems }} תנועות
+            {{ l.moreItems === 1 ? 'ועוד תנועה אחת' : `ועוד ${l.moreItems} תנועות` }}
           </p>
           <RouterLink :to="txnLink(l)" class="inline-block text-xs font-semibold underline">
-            כל התנועות בקטגוריה →
+            כל התנועות בקטגוריה ←
           </RouterLink>
         </div>
       </li>

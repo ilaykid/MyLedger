@@ -7,8 +7,8 @@ async function undo() { busy.value = true; try {
     await api.undo(id.value);
     id.value = '';
 }
-catch (e) {
-    error.value = String(e instanceof Error ? e.message : e);
+catch {
+    error.value = 'לא הצלחנו לבטל את השינוי. נסו שוב בעוד רגע.';
 }
 finally {
     busy.value = false;
@@ -20,7 +20,7 @@ onBeforeUnmount(() => window.removeEventListener('ledger:undo', receive));
 <div v-if="id" class="undo-notice" role="status">
 <span>{{error || 'השינוי נשמר'}}</span>
 <button class="btn" :disabled="busy" @click="undo">{{busy?'מבטל…':'ביטול השינוי'}}</button>
-<RouterLink to="/activity" class="text-sm underline">היסטוריה</RouterLink>
+<RouterLink to="/activity" class="text-sm underline">היסטוריית שינויים</RouterLink>
 <button class="icon-btn" aria-label="סגירת ההודעה" @click="id=''">×</button>
 </div>
 </template>

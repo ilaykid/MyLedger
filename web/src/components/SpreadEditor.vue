@@ -96,7 +96,7 @@ async function remove() {
         {{ incoming ? 'פריסת הכנסה על כמה חודשים' : 'פריסת הוצאה על כמה חודשים' }}
       </p>
       <p class="mt-1 text-xs" :style="{ color: 'var(--text-muted)' }">
-        {{ fmtILSRound(Math.abs(props.txn.amount)) }} שנכנסו בפעם אחת, נספרים בתזרים לאורך התקופה.
+        {{ fmtILSRound(Math.abs(props.txn.amount)) }} ש{{ incoming ? 'נכנסו' : 'יצאו' }} בבת אחת יחולקו בחישוב החודשי על פני התקופה. היתרה בבנק לא משתנה.
       </p>
 
       <label class="mt-3 block text-xs" :style="{ color: 'var(--text-secondary)' }">
@@ -132,7 +132,7 @@ async function remove() {
       </label>
 
       <p class="mt-2 text-xs" :style="{ color: 'var(--text-muted)' }">
-        היתרה בבנק לא משתנה — הכסף באמת נכנס ב{{ fmtDate(props.txn.date) }}.
+        הכסף {{ incoming ? 'נכנס' : 'יצא' }} בפועל ב־{{ fmtDate(props.txn.date) }}, והפריסה לא משנה את זה.
       </p>
 
       <div class="mt-3 flex items-center gap-2">

@@ -61,7 +61,7 @@ function mismatchGuidance(detail: SettlementMismatchDetail): string {
   const chosen = detail.bankTransactions.find((row) => row.id === detail.chosenBankTransactionId);
   const bankLabel = chosen?.description ?? 'חיוב הכרטיס בבנק';
   if (detail.difference > 0) {
-    return `הבנק מציג רק חיוב מרוכז, ולכן אי אפשר לדעת ממנו איזו שורה חסרה. בדוח ${bankLabel} למחזור ${fmtDate(detail.chargeDate)} חפשו סך של ${fmtILS(detail.bankTotal)}. אם זה הסכום בדוח, חסרה במשיכה עסקה או התאמה של ${fmtILS(detail.difference)}; אם בדוח מופיעים ${fmtILS(detail.cardTotal)}, החיוב בבנק כולל עמלה או התאמה נוספת.`;
+    return `הבנק מציג רק חיוב מרוכז, ולכן אי אפשר לדעת ממנו איזו שורה חסרה. בדוח ${bankLabel} למחזור ${fmtDate(detail.chargeDate)} חפשו סך של ${fmtILS(detail.bankTotal)}. אם זה הסכום בדוח, חסרה בעדכון הנתונים עסקה או התאמה של ${fmtILS(detail.difference)}; אם בדוח מופיעים ${fmtILS(detail.cardTotal)}, החיוב בבנק כולל עמלה או התאמה נוספת.`;
   }
   if (detail.difference < 0) {
     return `בדוח הכרטיס למחזור ${fmtDate(detail.chargeDate)} בדקו אילו עסקאות אינן כלולות בחיוב ${bankLabel}. בדרך כלל מדובר בזיכוי, בעסקה שנדחתה למחזור הבא או בתאריך חיוב שגוי.`;
@@ -73,7 +73,7 @@ const signedExact = fmtSignedFull;
 </script>
 
 <template>
-  <section v-if="visible.length" class="space-y-2.5" aria-label="התראות סנכרון">
+  <section v-if="visible.length" class="space-y-2.5" aria-label="התראות על עדכון הנתונים">
     <article
       v-for="issue in visible"
       :key="key(issue)"
@@ -92,13 +92,13 @@ const signedExact = fmtSignedFull;
             :aria-expanded="expanded === key(issue)"
             @click="toggleDetail(issue)"
           >
-            {{ expanded === key(issue) ? 'סגור פירוט' : 'הצג את הפער' }}
+            {{ expanded === key(issue) ? 'הסתרת הפירוט' : 'הצגת הפער' }}
           </button>
         </div>
         <button
           class="icon-btn shrink-0 self-start"
-          :aria-label="`התעלם מ${issue.title}`"
-          title="הסתר עד לרענון"
+          :aria-label="`הסתרת ההתראה: ${issue.title}`"
+          title="הסתרה עד לרענון"
           @click="dismissed.add(key(issue))"
         >
           ✕
@@ -175,7 +175,7 @@ const signedExact = fmtSignedFull;
 
             <section>
               <div class="flex items-baseline justify-between gap-2">
-                <h5 class="text-xs font-bold">העסקאות שכאל שייכה למחזור</h5>
+                <h5 class="text-xs font-bold">העסקאות ש{{ detailByKey[key(issue)].account.displayName ? `שויכו למחזור ב${detailByKey[key(issue)].account.displayName}` : 'חברת האשראי שייכה למחזור' }}</h5>
                 <span class="text-xs" :style="{ color: 'var(--text-muted)' }">
                   {{ detailByKey[key(issue)].cardTransactions.length }} עסקאות
                 </span>

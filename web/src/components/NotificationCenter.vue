@@ -99,7 +99,8 @@ onBeforeUnmount(() => {
       >
         <header class="flex items-center justify-between border-b px-4 py-3" :style="{ borderColor: 'var(--gridline)' }">
           <div>
-            <h2 class="text-sm font-bold">התראות ותובנות</h2>
+            <!-- In the review hub the tab already says "תובנות". -->
+            <h2 v-if="!embedded" class="text-sm font-bold">התראות ותובנות</h2>
             <p class="text-xs" :style="{ color: 'var(--text-muted)' }">חריגות ושינויים שכדאי לבדוק בתנועות</p>
           </div>
           <button class="text-link" :disabled="loading" @click="load">{{loading?'בודק…':'בדיקה מחדש'}}</button>

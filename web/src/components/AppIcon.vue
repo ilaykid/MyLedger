@@ -12,6 +12,7 @@ const paths: Record<string,string> = {
   history:'M4 10a8 8 0 1 1 0 5 M4 4v6h6 M12 7v5l3 2',
   arrow:'M19 12H5m6-6-6 6 6 6',
   menu:'M4 6h16 M4 12h16 M4 18h16',
+  pencil:'M4 20h4L19 9l-4-4L4 16z M13.5 6.5l4 4',
 };
 </script>
 <template><svg :width="size ?? 20" :height="size ?? 20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path :d="paths[name] ?? paths.settings"/></svg></template>

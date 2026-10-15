@@ -44,19 +44,65 @@ export function currentMonthKey(): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 }
 
-/** Exact dates use the user's preferred Israeli DD/MM/YYYY format everywhere. */
-export function fmtDayMonth(iso: string): string {
-  return fmtDate(iso);
+/** A date-only ISO string is a calendar day, not UTC midnight: read it locally. */
+function parseDay(iso: string): Date {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(iso);
 }
 
-/** Compact form for axis ticks: 12,400 -> "12.4K" */
+/**
+ * Short Israeli date: "15/09". The year is appended only when it is not the
+ * current one ("15/09/2025"), so this cycle's dates stay compact.
+ */
+export function fmtDayMonth(iso: string): string {
+  const date = parseDay(iso);
+  const short = String(date.getDate()).padStart(2, '0') + '/' + String(date.getMonth() + 1).padStart(2, '0');
+  return date.getFullYear() === new Date().getFullYear() ? short : `${short}/${date.getFullYear()}`;
+}
+
+/** Whole days from today to the given day (0 = today, 1 = tomorrow, -1 = yesterday). */
+function daysFromToday(iso: string): number {
+  const d = parseDay(iso), now = new Date();
+  return Math.round((Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) - Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())) / 86_400_000);
+}
+
+/** Dates in upcoming lists: "היום" / "מחר", otherwise the short date. */
+export function fmtRelativeDay(iso: string): string {
+  const diff = daysFromToday(iso);
+  return diff === 0 ? 'היום' : diff === 1 ? 'מחר' : fmtDayMonth(iso);
+}
+
+/** The same as a phrase after a noun: "היום" / "מחר" / "ב-15/10". */
+export function fmtWhen(iso: string): string {
+  const diff = daysFromToday(iso);
+  return diff === 0 || diff === 1 ? fmtRelativeDay(iso) : `ב-${fmtDayMonth(iso)}`;
+}
+
+const timeFmt = new Intl.DateTimeFormat('he-IL', { hour: '2-digit', minute: '2-digit', hour12: false });
+
+/** Data freshness: "עודכן היום 13:00" / "עודכן אתמול 08:00" / "עודכן ב-12/10". */
+export function fmtUpdatedAt(iso: string): string {
+  const diff = daysFromToday(iso);
+  if (diff === 0) return `עודכן היום ${timeFmt.format(new Date(iso))}`;
+  if (diff === -1) return `עודכן אתמול ${timeFmt.format(new Date(iso))}`;
+  return `עודכן ב-${fmtDayMonth(iso)}`;
+}
+
+/**
+ * Hebrew counts that agree: fmtCount(1, 'יום אחד', 'ימים') -> "יום אחד",
+ * fmtCount(5, 'יום אחד', 'ימים') -> "5 ימים".
+ */
+export function fmtCount(n: number, one: string, many: string): string {
+  return n === 1 ? one : `${n} ${many}`;
+}
+
+/** Compact form for axis ticks: 12,400 -> "12.4 אלף", 1,250,000 -> "1.3 מיליון" */
 export function fmtCompact(agorot: number): string {
   const shekels = agorot / 100;
   const abs = Math.abs(shekels);
-  if (abs >= 1000) {
-    const k = shekels / 1000;
-    return `${Number.isInteger(k) ? k : k.toFixed(1)}K`;
-  }
+  const short = (v: number) => (Number.isInteger(v) ? String(v) : v.toFixed(1));
+  if (abs >= 1_000_000) return `${short(shekels / 1_000_000)} מיליון`;
+  if (abs >= 1000) return `${short(shekels / 1000)} אלף`;
   return String(Math.round(shekels));
 }
 

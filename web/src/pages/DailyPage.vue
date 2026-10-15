@@ -11,7 +11,7 @@
  * arrow through is a queue that actually gets cleared.
  */
 import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue';
-import { api, type DailyReview, type ReviewCard } from '../lib/api.js';
+import { api, errorText, type DailyReview, type ReviewCard } from '../lib/api.js';
 import AppDialog from '../components/AppDialog.vue';
 import { useLatest } from '../lib/useLatest.js';
 import { type Preview } from '../lib/api.js';
@@ -106,7 +106,7 @@ async function assign(categoryId: string, confirmed=false) {
   const c = card.value;
   if (!c?.transaction || busy.value) return;
   const merchant = c.transaction.merchant;
-  if(applyToAll.value&&merchant&&!confirmed){busy.value=true;try{sweep.value={categoryId,transactionId:c.transaction.id,preview:await api.previewMerchant(c.transaction.id,categoryId)}}catch(e){error.value=String(e)}finally{busy.value=false}return;}
+  if(applyToAll.value&&merchant&&!confirmed){busy.value=true;try{sweep.value={categoryId,transactionId:c.transaction.id,preview:await api.previewMerchant(c.transaction.id,categoryId)}}catch(e){error.value=errorText(e)}finally{busy.value=false}return;}
   busy.value = true;
   flash.value = null;
   try {
@@ -229,7 +229,7 @@ async function acknowledge() {
   try {
     await api.dismissReviewCard(c.id, c.kind);
     remove(c.id);
-  } catch(e) {error.value=String(e)} finally {busy.value=false}
+  } catch(e) {error.value=errorText(e)} finally {busy.value=false}
 }
 
 /** RTL: ArrowLeft advances, ArrowRight goes back - same as the timeline chart. */
@@ -260,7 +260,8 @@ const kindStyle: Record<string, { icon: string; tone: string }> = {
   <div class="mx-auto max-w-xl space-y-4">
     <div class="flex flex-wrap items-baseline justify-between gap-2">
       <div>
-        <component :is="embedded?'h2':'h1'" class="text-xl font-bold">{{ scope === 'daily' ? 'סיווג קצר' : 'מעבר על ההוצאות' }}</component>
+        <!-- Embedded in the review hub, the tab already names this; no second heading. -->
+        <h1 v-if="!embedded" class="text-xl font-bold">סיווג תנועות</h1>
         <p class="section-hint mt-0.5">
           {{
             scope === 'daily'
@@ -274,22 +275,24 @@ const kindStyle: Record<string, { icon: string; tone: string }> = {
       </span>
     </div>
 
-    <!-- Two queues, same mechanic: the short daily pass, and the full sweep. -->
-    <div class="flex gap-1.5" role="tablist">
+    <!--
+      Two queues, same mechanic: the short daily pass, and the full sweep.
+      A pair of toggle buttons, not tabs - there is one panel whose contents
+      change, so aria-pressed says exactly what is going on.
+    -->
+    <div class="flex gap-1.5" role="group" aria-label="איזה תור להציג">
       <button
         class="btn"
         :class="scope === 'daily' ? 'btn-primary' : 'btn-ghost'"
-        role="tab"
-        :aria-selected="scope === 'daily'"
+        :aria-pressed="scope === 'daily'"
         @click="setScope('daily')"
       >
-        מנה קצרה
+        החשובות עכשיו
       </button>
       <button
         class="btn"
         :class="scope === 'expenses' ? 'btn-primary' : 'btn-ghost'"
-        role="tab"
-        :aria-selected="scope === 'expenses'"
+        :aria-pressed="scope === 'expenses'"
         @click="setScope('expenses')"
       >
         כל ההוצאות
@@ -408,7 +411,7 @@ const kindStyle: Record<string, { icon: string; tone: string }> = {
             :disabled="busy"
             @click="assign(card.transaction.currentCategoryId)"
           >
-            {{ card.kind === 'confirm' ? '✓ נכון, השאירו מוחרג' : '✓ נכון, אשר' }}
+            {{ card.kind === 'confirm' ? '✓ נכון, לא לספור בתזרים' : '✓ נכון, לאשר' }}
           </button>
           <button
             v-for="s in card.transaction.suggestions.slice(0,3)"
@@ -419,7 +422,7 @@ const kindStyle: Record<string, { icon: string; tone: string }> = {
           >
             <span v-if="s.icon" class="me-1" aria-hidden="true">{{ s.icon }}</span>{{ s.name }}
           </button>
-          <button class="btn btn-ghost" :disabled="busy" @click="next">דלג</button>
+          <button class="btn btn-ghost" :disabled="busy" @click="next">דילוג</button>
         </div>
 
         <details v-if="card.transaction" class="mt-4 text-sm">
@@ -433,7 +436,7 @@ const kindStyle: Record<string, { icon: string; tone: string }> = {
             📝 {{ card.transaction.note ? 'עריכת ההערה' : 'הוספת הערה' }}
           </button>
           <button class="underline" :aria-expanded="panel === 'split'" @click="openPanel('split')">
-            🗓️ {{ card.transaction.spread ? `פרוס על ${card.transaction.spread.months} חודשים` : 'חלוקה על פני חודשים' }}
+            🗓️ {{ card.transaction.spread ? `פריסה על ${card.transaction.spread.months} חודשים` : 'פריסה' }}
           </button>
           <span v-if="card.transaction.note && panel !== 'note'" class="truncate" :style="{ color: 'var(--text-muted)' }">
             {{ card.transaction.note }}
@@ -446,10 +449,11 @@ const kindStyle: Record<string, { icon: string; tone: string }> = {
           :style="{ background: 'var(--surface-2)' }"
         >
           <label class="block text-xs" :style="{ color: 'var(--text-secondary)' }">
-            מה זו ההוצאה הזאת, מעבר לכותרת
+            <span class="sr-only">הערה לתנועה</span>
             <input
               v-model="noteDraft"
               type="text"
+              placeholder="הערה (למשל: מתנה ליום הולדת)"
               maxlength="500"
               class="field mt-1 w-full !py-1 text-sm"
               @keyup.enter="saveNote"
@@ -480,7 +484,7 @@ const kindStyle: Record<string, { icon: string; tone: string }> = {
           <!-- See the result before committing to it. -->
           <p v-if="splitMonths >= 2 && splitMonths <= 60" class="mt-2 text-xs" :style="{ color: 'var(--text-secondary)' }">
             <span class="tnum font-semibold">{{ fmtILSRound(perMonth) }}</span> לחודש ·
-            היתרה בבנק לא משתנה, רק האופן שבו זה נספר בתזרים.
+            היתרה בבנק לא משתנה, רק האופן שבו זה נספר בהוצאות החודשיות.
           </p>
           <div class="mt-2 flex gap-2">
             <button
@@ -488,7 +492,7 @@ const kindStyle: Record<string, { icon: string; tone: string }> = {
               :disabled="busy || splitMonths < 2 || splitMonths > 60"
               @click="saveSplit"
             >
-              {{ card.transaction.spread ? 'עדכון' : 'חלוקה' }}
+              {{ card.transaction.spread ? 'עדכון הפריסה' : 'פריסה' }}
             </button>
             <button class="btn btn-ghost !py-1 !text-xs" :disabled="busy" @click="panel = 'none'">ביטול</button>
           </div>
@@ -497,19 +501,19 @@ const kindStyle: Record<string, { icon: string; tone: string }> = {
         <!-- Not chained to the panels above: they are conditional *within* a
              transaction card, and a v-else against them would swallow this. -->
         <div v-if="!card.transaction && card.kind === 'done'" class="mt-5 flex flex-wrap gap-2">
-          <RouterLink to="/" class="btn btn-primary">לדשבורד</RouterLink>
+          <RouterLink to="/" class="btn btn-primary">למסך החודש</RouterLink>
           <button class="btn btn-ghost" @click="load">רענון</button>
         </div>
 
         <div v-else-if="!card.transaction" class="mt-5 flex flex-wrap gap-2">
           <button class="btn btn-primary" :disabled="busy" @click="acknowledge">הבנתי</button>
           <RouterLink v-if="card.kind === 'sync'" to="/connections" class="btn btn-ghost">
-            לעמוד החיבורים
+            חשבונות וחיבורים ←
           </RouterLink>
         </div>
 
         <p v-if="handled > 0 && card.kind === 'done'" class="mt-4 text-sm" :style="{ color: 'var(--status-good)' }">
-          סווגת {{ handled }} תנועות היום.
+          {{ handled === 1 ? 'תנועה אחת סווגה בסבב הזה.' : `${handled} תנועות סווגו בסבב הזה.` }}
         </p>
       </section>
 

@@ -36,12 +36,12 @@ const steps = computed(() => [
     action: 'חיבור כרטיס',
   },
   {
-    title: 'הריצו משיכה ראשונה',
-    body: 'המשיכה הראשונה עמוקה ולוקחת כמה דקות. אם האתר מבקש קוד SMS, התחברו פעם אחת ידנית עם הפקודה הזו, והמכשיר ייזכר מאז:',
-    code: 'npm run login -- <ספק>',
+    title: 'הריצו עדכון נתונים ראשון',
+    body: 'עדכון הנתונים הראשון עמוק ולוקח כמה דקות. אם האתר של הבנק או חברת האשראי מבקש קוד SMS, פתחו חלון PowerShell בתיקיית MyLedger והריצו פעם אחת את הפקודה הבאה, עם הבנק או חברת האשראי במקום hapoalim. בדפדפן שייפתח התחברו וסמנו "זכור את המכשיר":',
+    code: 'npm run login -- hapoalim',
     done: list.value.some((c) => c.accounts.some((a) => a.transactions > 0)),
     to: '/connections',
-    action: 'למשיכה',
+    action: 'לעדכון נתונים',
   },
   {
     title: 'סווגו את מה שנשאר',
@@ -63,7 +63,7 @@ const next = computed(() => steps.value.findIndex((s) => !s.done));
     </div>
 
     <p v-if="meta && !meta.canStoreCredentials" class="notice notice-warning">
-      הצפנת הסיסמאות נשענת כרגע על Windows (DPAPI). במערכת הפעלה אחרת אפשר לעיין בנתוני הדגמה, אבל לא לחבר חשבון אמיתי.
+      הסיסמאות נשמרות מוצפנות בחשבון Windows שלכם, ולכן חיבור חשבון אמיתי אפשרי כרגע רק ב-Windows. במערכת הפעלה אחרת אפשר לעיין בנתוני הדגמה.
     </p>
 
     <ol class="welcome-steps">
@@ -84,7 +84,7 @@ const next = computed(() => steps.value.findIndex((s) => !s.done));
         <li><b>סיסמאות מוצפנות.</b> הן נאטמות בהצפנת Windows של המשתמש שלכם, ולא נשלחות חזרה לדפדפן.</li>
         <li><b>רק אתם ניגשים.</b> הממשק זמין רק מהמחשב הזה (127.0.0.1), לא מהרשת.</li>
       </ul>
-      <p class="welcome-demo">רוצים רק להסתכל קודם? <code>npm run seed</code> טוען משק בית לדוגמה.</p>
+      <p class="welcome-demo">רוצים רק להסתכל קודם? הריצו <code>npm run seed</code> בחלון PowerShell בתיקיית MyLedger כדי לטעון משק בית לדוגמה.</p>
     </div>
   </section>
 </template>

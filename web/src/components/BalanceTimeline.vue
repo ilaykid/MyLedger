@@ -17,9 +17,12 @@ const props = defineProps<{
   points: TimelinePoint[];
   todayISO: string;
   overdraftDate: string | null;
+  /** The lowest projected balance, from the cash-flow engine; named in the hint. */
+  lowestPoint?: { date: string; balance: number } | null;
 }>();
 
-const PAD = { top: 18, right: 14, bottom: 26, left: 52 };
+// Left padding fits a tick like "-12.5 אלף" at 11px.
+const PAD = { top: 18, right: 14, bottom: 26, left: 68 };
 const HEIGHT = 260;
 
 const host = ref<HTMLElement | null>(null);
@@ -188,8 +191,9 @@ function onMove(event: PointerEvent) {
 function onKey(event: KeyboardEvent) {
   const last = props.points.length - 1;
   const current = activeIndex.value ?? Math.max(0, lastActualIndex.value);
-  // RTL: ArrowLeft advances in time, ArrowRight goes back.
-  const map: Record<string, number> = { ArrowLeft: 1, ArrowRight: -1, ArrowUp: 1, ArrowDown: -1 };
+  // Time runs left to right on this axis (the svg is direction="ltr"), so the
+  // keys follow what the eye sees: ArrowRight moves the crosshair right, i.e. later.
+  const map: Record<string, number> = { ArrowRight: 1, ArrowLeft: -1, ArrowUp: 1, ArrowDown: -1 };
   if (event.key in map) {
     activeIndex.value = Math.min(last, Math.max(0, current + map[event.key]));
     event.preventDefault();
@@ -211,19 +215,28 @@ watch(
   },
 );
 
-const eventKindLabel: Record<string, string> = {
-  income: 'הכנסה',
-  fixed: 'הוצאה קבועה',
-  card_settlement: 'חיוב אשראי',
-  excluded: 'לא תזרימי',
-};
+/** The one hint above the chart: how to read it, then the two numbers that matter. */
+const hint = computed(() => {
+  const end = props.points[props.points.length - 1];
+  const endText = end ? `${hasForecast.value ? 'צפויה בסוף המחזור' : 'בסוף המחזור'}: ${fmtILSRound(end.balance)}` : '';
+  if (!hasForecast.value) return `יתרה משוחזרת מהתנועות שנקלטו${endText ? ' · ' + endText : ''}`;
+  const low = props.lowestPoint ? ` הנקודה הנמוכה: ${fmtILSRound(props.lowestPoint.balance)} ב-${fmtDayMonth(props.lowestPoint.date)}` : '';
+  return `קו מלא — מה שקרה; קו בהיר — תחזית.${low}${endText ? (low ? ' · ' : ' ') + endText : ''}`;
+});
+
+/** Spoken readout of the focused day, for keyboard and screen-reader users. */
+const readout = computed(() =>
+  active.value
+    ? `${fmtDayMonth(active.value.date)}: ${active.value.actual ? 'יתרה בעו״ש בפועל' : 'יתרה צפויה בעו״ש'} ${fmtILSRound(active.value.balance)}`
+    : '',
+);
 </script>
 
 <template>
   <div>
     <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
       <p class="section-hint">
-        {{ hasForecast ? 'שחזור מהיתרות האחרונות והתנועות שנמשכו; מכאן והלאה הערכה. יתרות ממועדים שונים עלולות ליצור סטייה.' : 'שחזור היתרה מהנתונים שנמשכו, ולא דוח יתרות יומי מהבנק.' }}
+        {{ hint }}
       </p>
       <button class="btn btn-ghost !py-1 !text-xs" :aria-pressed="showTable" @click="showTable = !showTable">
         {{ showTable ? 'תצוגת גרף' : 'תצוגת טבלה' }}
@@ -237,7 +250,7 @@ const eventKindLabel: Record<string, string> = {
         <thead class="sticky top-0" :style="{ background: 'var(--surface-2)' }">
           <tr class="text-right" :style="{ color: 'var(--text-muted)' }">
             <th scope="col" class="px-3 py-2 font-medium">תאריך</th>
-            <th scope="col" class="px-3 py-2 font-medium">יתרה</th>
+            <th scope="col" class="px-3 py-2 font-medium">יתרה בעו״ש</th>
             <th scope="col" class="px-3 py-2 font-medium">הוצאה משתנה</th>
             <th scope="col" class="px-3 py-2 font-medium">אירועים</th>
           </tr>
@@ -262,12 +275,13 @@ const eventKindLabel: Record<string, string> = {
 
     <!-- Chart view -->
     <div v-else ref="host" class="relative">
+      <p class="sr-only" aria-live="polite">{{ readout }}</p>
       <svg
         :viewBox="`0 0 ${width} ${HEIGHT}`"
-        :style="{ width: '100%', height: `${HEIGHT}px`, touchAction: 'pan-y' }"
+        :style="{ width: '100%', height: `${HEIGHT}px`, touchAction: 'pan-y', direction: 'ltr' }"
         role="img"
         tabindex="0"
-        aria-label="גרף יתרת החשבון לאורך המחזור. השתמשו במקשי החצים לעיון בימים."
+        aria-label="גרף היתרה בעו״ש לאורך המחזור. החץ ימינה עובר ליום הבא והחץ שמאלה ליום הקודם."
         @pointermove="onMove"
         @pointerleave="activeIndex = null"
         @keydown="onKey"
@@ -412,13 +426,12 @@ const eventKindLabel: Record<string, string> = {
           <span :style="{ color: 'var(--text-muted)' }">{{ fmtDayMonth(active.date) }}</span>
         </div>
         <div class="mt-0.5" :style="{ color: 'var(--text-muted)' }">
-          {{ active.actual ? 'יתרה משוחזרת' : 'יתרה חזויה' }}
+          {{ active.actual ? 'יתרה בעו״ש בפועל' : 'יתרה צפויה בעו״ש' }}
         </div>
         <div v-if="active.variableSpend > 0" class="mt-1.5 flex items-center gap-1.5">
-          <span class="inline-block h-0.5 w-3 rounded-full" :style="{ background: 'var(--series-2)' }"></span>
           <span class="tnum font-semibold">{{ fmtILSRound(active.variableSpend) }}</span>
           <span :style="{ color: 'var(--text-muted)' }">
-            {{ active.actual ? 'הוצאה משתנה בפועל' : 'תחזית הוצאה ישירה מהעו״ש' }}
+            {{ active.actual ? 'הוצאה משתנה בפועל' : 'הוצאה משתנה צפויה (לא באשראי)' }}
           </span>
         </div>
         <ul v-if="active.events.length" class="mt-1.5 space-y-1 border-t pt-1.5" :style="{ borderColor: 'var(--gridline)' }">
@@ -447,7 +460,7 @@ const eventKindLabel: Record<string, string> = {
         כסף יוצא
       </span>
       <span v-if="overdraftDate" :style="{ color: 'var(--status-critical)' }">
-        🔴 צפויה יציאה למינוס ב-{{ fmtDayMonth(overdraftDate) }}
+        צפוי מינוס בעו״ש ב-{{ fmtDayMonth(overdraftDate) }}
       </span>
     </div>
   </div>

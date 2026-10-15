@@ -769,7 +769,8 @@ app.delete('/api/telegram', async () => {
 app.post('/api/telegram/test', async (_req, reply) => {
   if (DEMO) return demoBlocked(reply);
   const result = await sendTelegram(
-    '<b>📒 MyLedger</b>\nההתחברות עובדת — מכאן תקבל את הסיכומים היומיים והתראות הסנכרון.',
+    '<b>📒 MyLedger</b>\nההתחברות עובדת. מכאן יגיע כל בוקר סיכום של אתמול ומצב המחזור — ' +
+      'בשקט בימים רגילים, ועם צליל כשיש משהו לבדוק (חשבון שלא התעדכן, חיוב חשוד, צפי למינוס).',
   );
   return result;
 });
