@@ -185,7 +185,9 @@ const budgetPct = computed(() => {
       <div class="analysis-summary" :class="{ 'opacity-50': loading }">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <p class="text-sm font-semibold" :style="{ color: 'var(--text-secondary)' }">
-            {{ running ? (positive ? 'עודף צפוי לסוף החודש' : 'גירעון צפוי לסוף החודש') : 'מאזן החודש' }}
+            <!-- The projection is the current cycle's (the same figure as the home
+                 screen), which can run past the calendar month - so it says so. -->
+            {{ running ? (positive ? 'עודף צפוי בסוף המחזור' : 'גירעון צפוי בסוף המחזור') : 'מאזן החודש' }}
           </p>
           <span
             class="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-semibold"
@@ -204,7 +206,7 @@ const budgetPct = computed(() => {
         </p>
 
         <p v-if="data.projection" class="mt-1.5 text-sm" :style="{ color: 'var(--text-secondary)' }">
-          יום {{ data.projection.daysElapsed }} מתוך {{ data.projection.daysTotal }}
+          יום {{ data.projection.daysElapsed }} מתוך {{ data.projection.daysTotal }} במחזור · כמו במסך החודש
         </p>
         <p v-else class="mt-1.5 text-sm" :style="{ color: 'var(--text-secondary)' }">
           החודש נסגר. הכנסות פחות הוצאות שנספרות בתזרים, בלי הפקדות לחיסכון.

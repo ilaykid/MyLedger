@@ -95,19 +95,19 @@ finally {
 </div>
 <div class="flex gap-2">
 <button class="btn btn-ghost" :disabled="busy" @click="detect">{{busy?'מחפש…':'זיהוי מההיסטוריה'}}</button>
-<button class="btn btn-primary" @click="edit()">הוספת התחייבות</button>
+<button class="btn btn-primary" @click="edit()">הוספה ידנית</button>
 </div>
 </header>
 <p v-if="error&&!open" role="alert" class="error-box">{{error}}</p>
 <p v-if="message" role="status" class="notice-panel">{{message}}</p>
 <div class="metric-grid">
 <div class="metric-card">
-<span>הכנסה חודשית מתוכננת</span>
-<strong>{{loading?'—':fmtILSRound(totals.income)}}</strong>
+<h2>הכנסה חודשית מתוכננת</h2>
+<strong class="value block">{{loading?'—':fmtILSRound(totals.income)}}</strong>
 </div>
 <div class="metric-card">
-<span>הוצאה חודשית מתוכננת</span>
-<strong>{{loading?'—':fmtILSRound(totals.expense)}}</strong>
+<h2>הוצאה חודשית מתוכננת</h2>
+<strong class="value block">{{loading?'—':fmtILSRound(totals.expense)}}</strong>
 </div>
 </div>
 <p class="section-hint">סכומים פעילים ובתוקף. דו־חודשי מחושב כמחצית; סכום זה שונה מהיתרה שעוד נותרה לתשלום במחזור.</p>
@@ -131,7 +131,7 @@ finally {
 </article>
 <p v-if="!items.length" class="empty-state">אין עדיין הכנסות או הוצאות קבועות. אפשר להוסיף ידנית או לזהות מההיסטוריה.</p>
 </div>
-<AppDialog :open="open" :title="editing?'עריכת התחייבות':'התחייבות חדשה'" @close="!busy&&(open=false)">
+<AppDialog :open="open" :title="editing?'עריכת קבועה':'הכנסה או הוצאה קבועה חדשה'" @close="!busy&&(open=false)">
 <form class="space-y-4" @submit.prevent="save">
 <p v-if="error" class="error-box" role="alert">{{error}}</p>
 <label class="block">שם כפי שמופיע בתנועה<input v-model="form.displayName" class="field w-full" required minlength="2" maxlength="120"/>
